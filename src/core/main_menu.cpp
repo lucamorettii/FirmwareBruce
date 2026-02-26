@@ -8,6 +8,7 @@ MainMenu::MainMenu() {
         &wifiMenu,
         &bleMenu,
         &mikaiMenu,
+        &tessereMenu,
 #if !defined(LITE_VERSION)
         &ethernetMenu,
 #endif

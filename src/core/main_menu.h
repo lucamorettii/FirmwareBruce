@@ -20,11 +20,13 @@
 #include "menu_items/RFMenu.h"
 #include "menu_items/ScriptsMenu.h"
 #include "menu_items/WifiMenu.h"
+#include "menu_items/tessere.h"
 
 class MainMenu {
 public:
     FileMenu fileMenu;
     Mikai mikaiMenu;
+    Tessere tessereMenu;
     BleMenu bleMenu;
     ClockMenu clockMenu;
     ConnectMenu connectMenu;
