@@ -44,11 +44,13 @@ struct mykey_t {
     uint32_t encryptionKey;
 };
 
+// Usate nelle varie funzioni
+bool mikai_check_lock_id(struct mykey_t *key);
+bool mikai_is_reset(struct mykey_t *key);
+
+// Usate nel menu
 // Salva il tag in memoria
 bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc);
-// Funziona che usa mikai_read_tag
-bool mikai_check_lock_id(struct mykey_t *key);
-
 // Ritorna le informazioni del tag
 void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen);
 // Aggiunge i soldi in RAM
@@ -61,12 +63,12 @@ bool mikai_has_pending_writes(struct mykey_t *key);
 int mikai_export_vendor(struct mykey_t *key, uint8_t buffer[8]);
 // Ritorna il credito
 uint16_t mikai_get_current_credit(struct mykey_t *key);
+// Reset key
+void mikai_reset_key(struct mykey_t *key);
 
 // Non usate
-bool mikai_is_reset(struct mykey_t *key);
 int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year);
 void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]);
-void mikai_reset_key(struct mykey_t *key);
 void mikai_reset_otp(struct mykey_t *key, Arduino_PN532_SRIX *nfc);
 void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]);
 void mikai_modify_block(struct mykey_t *key, const uint8_t block[4], uint8_t blockNum);

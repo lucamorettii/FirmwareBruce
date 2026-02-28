@@ -157,6 +157,18 @@ static void actionExportVendor() {
     showMessage("Export vendor", "Saved to: " + path);
 }
 
+static void actionReset() {
+    if (!loadTag()) return;
+
+    mikai_reset_key(&srixKey);
+
+    std::vector<Option> confirm = {
+        {"Write to tag", []() { actionWrite(); }, false},
+        {"Cancel",       []() {},                 false},
+    };
+    loopOptions(confirm, MENU_TYPE_SUBMENU, "Write reset?");
+}
+
 /*
 static void actionImportVendor() {
     if (!loadTag()) return;
@@ -196,8 +208,9 @@ void Mikai::optionsMenu() {
     std::vector<Option> options = {
         {"Info",          []() { actionInfo(); },         false},
         {"Add credit",    []() { actionAddCredit(); },    false},
+        {"Reset",         []() { actionReset(); },        false},
         {"Export vendor", []() { actionExportVendor(); }, false},
-        // {"Import vendor", []() { actionImportVendor(); }, false},
+        {"Import vendor", []() {},                        false},
     };
     loopOptions(options, MENU_TYPE_SUBMENU, "Mikai");
 }
