@@ -1,20 +1,7 @@
-/*
- * MikaiLogic.cpp
- * Ported from LibMIKAI (C) to C++ for Bruce firmware.
- * Original: Lilz0C â€“ LGPLv3
- *
- * All mykey/srix business logic is preserved 1:1 from the original C source.
- * NFC I/O uses Arduino_PN532_SRIX (the driver already present in Bruce).
- */
-
 #include "MikaiLogic.h"
 #include <Arduino.h>
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- *  NFC BRIDGE  â€“  wraps Arduino_PN532_SRIX
- *  These are the only functions that touch hardware.
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-
+// NFC brifge to Arduino_PN532_SRIX
 /**
  * Attempt INITIATE+SELECT until a tag answers, then read all 128 blocks.
  * Returns true on success.
@@ -24,7 +11,7 @@ static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
     if (!nfc->SRIX_init()) return false;
 
     // Poll until a tag responds to INITIATE+SELECT
-    for (int attempt = 0; attempt < 60; attempt++) {   // up to ~6 seconds
+    for (int attempt = 0; attempt < 60; attempt++) { // up to ~6 seconds
         if (nfc->SRIX_initiate_select()) return true;
         delay(100);
     }
@@ -70,52 +57,49 @@ static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t 
     }
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- *  PRIVATE CRYPTO / LOGIC HELPERS
- *  Identical to the original C code â€“ do not modify.
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-
+// Private
 /** Bit-transpose a 4-byte block (encode = decode, same op). */
 static void encode_decode_block(uint8_t block[4]) {
     uint8_t in[4] = {block[0], block[1], block[2], block[3]};
-    block[0]  =  (in[0] & 0xC0);
+    block[0] = (in[0] & 0xC0);
     block[0] |= ((in[1] & 0xC0) >> 2);
     block[0] |= ((in[2] & 0xC0) >> 4);
     block[0] |= ((in[3] & 0xC0) >> 6);
-    block[1]  = ((in[0] & 0x30) << 2);
-    block[1] |=  (in[1] & 0x30);
+    block[1] = ((in[0] & 0x30) << 2);
+    block[1] |= (in[1] & 0x30);
     block[1] |= ((in[2] & 0x30) >> 2);
     block[1] |= ((in[3] & 0x30) >> 4);
-    block[2]  = ((in[0] & 0x0C) << 4);
+    block[2] = ((in[0] & 0x0C) << 4);
     block[2] |= ((in[1] & 0x0C) << 2);
-    block[2] |=  (in[2] & 0x0C);
+    block[2] |= (in[2] & 0x0C);
     block[2] |= ((in[3] & 0x0C) >> 2);
-    block[3]  = ((in[0] & 0x03) << 6);
+    block[3] = ((in[0] & 0x03) << 6);
     block[3] |= ((in[1] & 0x03) << 4);
     block[3] |= ((in[2] & 0x03) << 2);
-    block[3] |=  (in[3] & 0x03);
+    block[3] |= (in[3] & 0x03);
 }
 
 /** block[0] = checksum byte. */
 static void calculateBlockChecksum(uint8_t block[4], uint8_t blockNum) {
-    block[0] = 0xFF - blockNum
-             - (block[3] & 0x0F) - ((block[3] >> 4) & 0x0F)
-             - (block[2] & 0x0F) - ((block[2] >> 4) & 0x0F)
-             - (block[1] & 0x0F) - ((block[1] >> 4) & 0x0F);
+    block[0] = 0xFF - blockNum - (block[3] & 0x0F) - ((block[3] >> 4) & 0x0F) - (block[2] & 0x0F) -
+               ((block[2] >> 4) & 0x0F) - (block[1] & 0x0F) - ((block[1] >> 4) & 0x0F);
 }
 
 /** Days between 1/1/1995 and the given date. */
 static uint32_t days_difference(int day, int month, int year) {
-    if (month < 3) { year--; month += 12; }
-    return (uint32_t)(year*365 + year/4 - year/100 + year/400
-                      + (month*153+3)/5 + day - 728692);
+    if (month < 3) {
+        year--;
+        month += 12;
+    }
+    return (uint32_t)(year * 365 + year / 4 - year / 100 + year / 400 + (month * 153 + 3) / 5 + day - 728692);
 }
 
 static void calculateEncryptionKey(struct mykey_t *key) {
     uint32_t otp = (((uint32_t)(0xFFu - key->srix4k->eeprom[0x06][3]) << 24) |
                     ((uint32_t)(0xFFu - key->srix4k->eeprom[0x06][2]) << 16) |
-                    ((uint32_t)(0xFFu - key->srix4k->eeprom[0x06][1]) <<  8) |
-                     (uint32_t)(0xFFu - key->srix4k->eeprom[0x06][0])) + 1u;
+                    ((uint32_t)(0xFFu - key->srix4k->eeprom[0x06][1]) << 8) |
+                    (uint32_t)(0xFFu - key->srix4k->eeprom[0x06][0])) +
+                   1u;
 
     uint8_t b18[4], b19[4];
     memcpy(b18, key->srix4k->eeprom[0x18], 4);
@@ -123,23 +107,22 @@ static void calculateEncryptionKey(struct mykey_t *key) {
     encode_decode_block(b18);
     encode_decode_block(b19);
 
-    uint32_t masterKey = (uint32_t)(key->srix4k->uid *
-        (uint64_t)((((uint32_t)b18[2] << 24) | ((uint32_t)b18[3] << 16) |
-                    ((uint32_t)b19[2] <<  8) |  (uint32_t)b19[3]) + 1u));
+    uint32_t masterKey =
+        (uint32_t)(key->srix4k->uid * (uint64_t)((((uint32_t)b18[2] << 24) | ((uint32_t)b18[3] << 16) |
+                                                  ((uint32_t)b19[2] << 8) | (uint32_t)b19[3]) +
+                                                 1u));
 
     key->encryptionKey = masterKey * otp;
 }
 
 static bool srix_decrease_block6(struct srix_t *target, uint32_t toDecrease) {
     if (toDecrease == 0) return true;
-    uint32_t b6 = ((uint32_t)target->eeprom[0x06][3] << 24)
-                | ((uint32_t)target->eeprom[0x06][2] << 16)
-                | ((uint32_t)target->eeprom[0x06][1] <<  8)
-                |  (uint32_t)target->eeprom[0x06][0];
+    uint32_t b6 = ((uint32_t)target->eeprom[0x06][3] << 24) | ((uint32_t)target->eeprom[0x06][2] << 16) |
+                  ((uint32_t)target->eeprom[0x06][1] << 8) | (uint32_t)target->eeprom[0x06][0];
     if (b6 < toDecrease) return false;
     b6 -= toDecrease;
     target->eeprom[0x06][0] = (uint8_t)(b6);
-    target->eeprom[0x06][1] = (uint8_t)(b6 >>  8);
+    target->eeprom[0x06][1] = (uint8_t)(b6 >> 8);
     target->eeprom[0x06][2] = (uint8_t)(b6 >> 16);
     target->eeprom[0x06][3] = (uint8_t)(b6 >> 24);
     srix_flag_add(&target->srixFlag, 0x06);
@@ -169,18 +152,18 @@ static uint8_t get_current_transaction_offset(struct mykey_t *key) {
     cur[2] = key->srix4k->eeprom[0x3C][2] ^ key->srix4k->eeprom[0x07][2];
     cur[3] = key->srix4k->eeprom[0x3C][3] ^ key->srix4k->eeprom[0x07][3];
     encode_decode_block(cur);
-    if (cur[1] > 7) { Serial.println("[MIKAI] Bad tx pointer, using 7."); return 0x07; }
+    if (cur[1] > 7) {
+        Serial.println("[MIKAI] Bad tx pointer, using 7.");
+        return 0x07;
+    }
     return cur[1];
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
- *  PUBLIC API IMPLEMENTATION
- * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-
-bool mikai_nfc_init(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
+// Pubbliche
+bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
     memset(key->srix4k, 0, sizeof(struct srix_t));
     key->srix4k->srixFlag = srix_flag_init();
-    key->encryptionKey    = 0;
+    key->encryptionKey = 0;
 
     Serial.println("[MIKAI] Waiting for SRIX4K tag...");
     if (!nfc_wait_and_select(nfc)) {
@@ -198,16 +181,15 @@ bool mikai_nfc_init(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
         Serial.println("[MIKAI] Not an SRIX4K tag (bad UID header).");
         return false;
     }
-    key->srix4k->uid = ((uint64_t)uid_bytes[7] << 56) | ((uint64_t)uid_bytes[6] << 48)
-                     | ((uint64_t)uid_bytes[5] << 40) | ((uint64_t)uid_bytes[4] << 32)
-                     | ((uint64_t)uid_bytes[3] << 24) | ((uint64_t)uid_bytes[2] << 16)
-                     | ((uint64_t)uid_bytes[1] <<  8) |  (uint64_t)uid_bytes[0];
+    key->srix4k->uid = ((uint64_t)uid_bytes[7] << 56) | ((uint64_t)uid_bytes[6] << 48) |
+                       ((uint64_t)uid_bytes[5] << 40) | ((uint64_t)uid_bytes[4] << 32) |
+                       ((uint64_t)uid_bytes[3] << 24) | ((uint64_t)uid_bytes[2] << 16) |
+                       ((uint64_t)uid_bytes[1] << 8) | (uint64_t)uid_bytes[0];
     Serial.printf("[MIKAI] UID: %016llX\n", key->srix4k->uid);
 
     // Read all 128 blocks
     Serial.printf("[MIKAI] Reading %u blocks...\n", SRIX4K_BLOCKS);
-    for (uint8_t i = 0; i < SRIX4K_BLOCKS; i++)
-        read_block(nfc, key->srix4k->eeprom[i], i);
+    for (uint8_t i = 0; i < SRIX4K_BLOCKS; i++) read_block(nfc, key->srix4k->eeprom[i], i);
 
     calculateEncryptionKey(key);
     Serial.printf("[MIKAI] SK: %08X\n", key->encryptionKey);
@@ -225,8 +207,8 @@ bool mikai_check_lock_id(struct mykey_t *key) {
     uint8_t cc[4];
     cc[0] = key->srix4k->eeprom[0x21][0] ^ (key->encryptionKey >> 24);
     cc[1] = key->srix4k->eeprom[0x21][1] ^ (key->encryptionKey >> 16);
-    cc[2] = key->srix4k->eeprom[0x21][2] ^ (key->encryptionKey >>  8);
-    cc[3] = key->srix4k->eeprom[0x21][3] ^  key->encryptionKey;
+    cc[2] = key->srix4k->eeprom[0x21][2] ^ (key->encryptionKey >> 8);
+    cc[3] = key->srix4k->eeprom[0x21][3] ^ key->encryptionKey;
     encode_decode_block(cc);
     uint8_t saved = cc[0];
     calculateBlockChecksum(cc, 0x21);
@@ -237,8 +219,8 @@ uint16_t mikai_get_current_credit(struct mykey_t *key) {
     uint8_t cc[4];
     cc[0] = key->srix4k->eeprom[0x21][0] ^ (key->encryptionKey >> 24);
     cc[1] = key->srix4k->eeprom[0x21][1] ^ (key->encryptionKey >> 16);
-    cc[2] = key->srix4k->eeprom[0x21][2] ^ (key->encryptionKey >>  8);
-    cc[3] = key->srix4k->eeprom[0x21][3] ^  key->encryptionKey;
+    cc[2] = key->srix4k->eeprom[0x21][2] ^ (key->encryptionKey >> 8);
+    cc[3] = key->srix4k->eeprom[0x21][3] ^ key->encryptionKey;
     encode_decode_block(cc);
     return (uint16_t)((cc[2] << 8) | cc[3]);
 }
@@ -254,7 +236,7 @@ void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen) {
     if (!lockId) {
         if (!mikai_is_reset(key)) {
             uint16_t c = mikai_get_current_credit(key);
-            snprintf(tmp, sizeof(tmp), "Credit: %u.%02u EUR\n", c/100, c%100);
+            snprintf(tmp, sizeof(tmp), "Credit: %u.%02u EUR\n", c / 100, c % 100);
             strncat(out, tmp, outLen - strlen(out) - 1);
         }
         snprintf(tmp, sizeof(tmp), "SK: %08" PRIX32 "\n", key->encryptionKey);
@@ -266,10 +248,9 @@ void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen) {
     // Production date (BCD)
     int dd = ((key->srix4k->eeprom[0x08][0] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][0] & 0x0F);
     int mm = ((key->srix4k->eeprom[0x08][1] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][1] & 0x0F);
-    int yy = (key->srix4k->eeprom[0x08][3] & 0x0F) * 1000
-           + ((key->srix4k->eeprom[0x08][3] & 0xF0) >> 4) * 100
-           + ((key->srix4k->eeprom[0x08][2] & 0xF0) >> 4) * 10
-           +  (key->srix4k->eeprom[0x08][2] & 0x0F);
+    int yy = (key->srix4k->eeprom[0x08][3] & 0x0F) * 1000 +
+             ((key->srix4k->eeprom[0x08][3] & 0xF0) >> 4) * 100 +
+             ((key->srix4k->eeprom[0x08][2] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][2] & 0x0F);
     snprintf(tmp, sizeof(tmp), "Prod: %02d/%02d/%04d\n", dd, mm, yy);
     strncat(out, tmp, outLen - strlen(out) - 1);
 
@@ -277,44 +258,56 @@ void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen) {
     strncat(out, "--- Transactions ---\n", outLen - strlen(out) - 1);
     uint8_t current = get_current_transaction_offset(key);
     for (uint8_t i = 0; i < 8; i++) {
-        if (current == 7) current = 0; else current++;
+        if (current == 7) current = 0;
+        else current++;
         uint8_t *eb = key->srix4k->eeprom[0x34 + current];
-        if (eb[0]==0xFF && eb[1]==0xFF && eb[2]==0xFF && eb[3]==0xFF) {
+        if (eb[0] == 0xFF && eb[1] == 0xFF && eb[2] == 0xFF && eb[3] == 0xFF) {
             snprintf(tmp, sizeof(tmp), "[%u] No transaction\n", i);
         } else {
-            uint8_t  td = eb[0] >> 3;
-            uint8_t  tm = ((eb[0] & 0x07) << 1) | ((eb[1] & 0x80) >> 7);
+            uint8_t td = eb[0] >> 3;
+            uint8_t tm = ((eb[0] & 0x07) << 1) | ((eb[1] & 0x80) >> 7);
             uint16_t ty = 2000 + (eb[1] & 0x7F);
             uint16_t tc = (uint16_t)((eb[2] << 8) | eb[3]);
-            snprintf(tmp, sizeof(tmp), "[%u] %02u/%02u/%04u  %u.%02u EUR\n", i, td, tm, ty, tc/100, tc%100);
+            snprintf(
+                tmp, sizeof(tmp), "[%u] %02u/%02u/%04u  %u.%02u EUR\n", i, td, tm, ty, tc / 100, tc % 100
+            );
         }
         strncat(out, tmp, outLen - strlen(out) - 1);
     }
 }
 
-int mikai_add_cents(struct mykey_t *key, uint16_t cents,
-                    uint8_t day, uint8_t month, uint8_t year) {
-    if (mikai_check_lock_id(key))  { Serial.println("[MIKAI] Lock ID active."); return -1; }
-    if (mikai_is_reset(key))       { Serial.println("[MIKAI] Key not bound."); return -2; }
-    if (cents < 5)                 { Serial.println("[MIKAI] Amount < 5 cents."); return -3; }
+int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year) {
+    if (mikai_check_lock_id(key)) {
+        Serial.println("[MIKAI] Lock ID active.");
+        return -1;
+    }
+    if (mikai_is_reset(key)) {
+        Serial.println("[MIKAI] Key not bound.");
+        return -2;
+    }
+    if (cents < 5) {
+        Serial.println("[MIKAI] Amount < 5 cents.");
+        return -3;
+    }
 
-    uint16_t actual_credit    = mikai_get_current_credit(key);
+    uint16_t actual_credit = mikai_get_current_credit(key);
     uint16_t precedent_credit = actual_credit;
-    uint8_t  current          = get_current_transaction_offset(key);
+    uint8_t current = get_current_transaction_offset(key);
 
     while (cents >= 5) {
         precedent_credit = actual_credit;
         uint16_t step;
-        if      (cents >= 200) step = 200;
+        if (cents >= 200) step = 200;
         else if (cents >= 100) step = 100;
-        else if (cents >=  50) step =  50;
-        else if (cents >=  20) step =  20;
-        else if (cents >=  10) step =  10;
-        else                   step =   5;
-        cents         -= step;
+        else if (cents >= 50) step = 50;
+        else if (cents >= 20) step = 20;
+        else if (cents >= 10) step = 10;
+        else step = 5;
+        cents -= step;
         actual_credit += step;
 
-        if (current == 7) current = 0; else current++;
+        if (current == 7) current = 0;
+        else current++;
 
         uint8_t *eb = key->srix4k->eeprom[0x34 + current];
         eb[0] = (day << 3) | ((month & 0x0E) >> 1);
@@ -332,7 +325,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents,
     encode_decode_block(key->srix4k->eeprom[0x21]);
     key->srix4k->eeprom[0x21][0] ^= key->encryptionKey >> 24;
     key->srix4k->eeprom[0x21][1] ^= key->encryptionKey >> 16;
-    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >>  8;
+    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >> 8;
     key->srix4k->eeprom[0x21][3] ^= key->encryptionKey;
     srix_flag_add(&key->srix4k->srixFlag, 0x21);
 
@@ -344,7 +337,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents,
     encode_decode_block(key->srix4k->eeprom[0x25]);
     key->srix4k->eeprom[0x25][0] ^= key->encryptionKey >> 24;
     key->srix4k->eeprom[0x25][1] ^= key->encryptionKey >> 16;
-    key->srix4k->eeprom[0x25][2] ^= key->encryptionKey >>  8;
+    key->srix4k->eeprom[0x25][2] ^= key->encryptionKey >> 8;
     key->srix4k->eeprom[0x25][3] ^= key->encryptionKey;
     srix_flag_add(&key->srix4k->srixFlag, 0x25);
 
@@ -378,8 +371,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents,
     return 0;
 }
 
-int mikai_set_cents(struct mykey_t *key, uint16_t cents,
-                    uint8_t day, uint8_t month, uint8_t year) {
+int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year) {
     uint8_t dump21[SRIX_BLOCK_LENGTH];
     uint8_t dump34[9 * SRIX_BLOCK_LENGTH];
     memcpy(dump21, key->srix4k->eeprom[0x21], SRIX_BLOCK_LENGTH);
@@ -391,7 +383,7 @@ int mikai_set_cents(struct mykey_t *key, uint16_t cents,
     key->srix4k->eeprom[0x21][3] = 0x80;
     key->srix4k->eeprom[0x21][0] ^= key->encryptionKey >> 24;
     key->srix4k->eeprom[0x21][1] ^= key->encryptionKey >> 16;
-    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >>  8;
+    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >> 8;
     key->srix4k->eeprom[0x21][3] ^= key->encryptionKey;
     memset(key->srix4k->eeprom[0x34], 0xFF, 9 * SRIX_BLOCK_LENGTH);
 
@@ -403,12 +395,11 @@ int mikai_set_cents(struct mykey_t *key, uint16_t cents,
     return 0;
 }
 
-void mikai_import_vendor(struct mykey_t *key,
-                         const uint8_t block18[4], const uint8_t block19[4]) {
+void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]) {
     // Decode 21/25 with old SK
     for (int b = 0; b < 4; b++) {
-        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8*(3-b)));
-        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8*(3-b)));
+        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8 * (3 - b)));
+        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8 * (3 - b)));
     }
     memcpy(key->srix4k->eeprom[0x18], block18, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x18);
@@ -417,8 +408,8 @@ void mikai_import_vendor(struct mykey_t *key,
     calculateEncryptionKey(key);
     // Re-encode 21/25 with new SK
     for (int b = 0; b < 4; b++) {
-        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8*(3-b)));
-        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8*(3-b)));
+        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8 * (3 - b)));
+        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8 * (3 - b)));
     }
     srix_flag_add(&key->srix4k->srixFlag, 0x21);
     srix_flag_add(&key->srix4k->srixFlag, 0x25);
@@ -443,64 +434,133 @@ int mikai_export_vendor(struct mykey_t *key, uint8_t buffer[8]) {
 
 void mikai_reset_key(struct mykey_t *key) {
     for (uint8_t i = 0x10; i < SRIX4K_BLOCKS; i++) {
-        uint8_t block[4] = {0,0,0,0};
+        uint8_t block[4] = {0, 0, 0, 0};
         switch (i) {
-            case 0x10: case 0x14: case 0x3F: case 0x43: {
+            case 0x10:
+            case 0x14:
+            case 0x3F:
+            case 0x43: {
                 block[1] = key->srix4k->eeprom[0x07][0];
-                int dd = ((key->srix4k->eeprom[0x08][0]&0xF0)>>4)*10 + (key->srix4k->eeprom[0x08][0]&0x0F);
-                int mm = ((key->srix4k->eeprom[0x08][1]&0xF0)>>4)*10 + (key->srix4k->eeprom[0x08][1]&0x0F);
-                int yy = (key->srix4k->eeprom[0x08][3]&0x0F)*1000
-                       + ((key->srix4k->eeprom[0x08][3]&0xF0)>>4)*100
-                       + ((key->srix4k->eeprom[0x08][2]&0xF0)>>4)*10
-                       + (key->srix4k->eeprom[0x08][2]&0x0F);
-                uint32_t el = days_difference(dd,mm,yy);
-                block[2] = (uint8_t)((el/1000%10)*16 + (el/100%10));
-                block[3] = (uint8_t)((el/10%10)*16   + (el%10));
+                int dd =
+                    ((key->srix4k->eeprom[0x08][0] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][0] & 0x0F);
+                int mm =
+                    ((key->srix4k->eeprom[0x08][1] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][1] & 0x0F);
+                int yy = (key->srix4k->eeprom[0x08][3] & 0x0F) * 1000 +
+                         ((key->srix4k->eeprom[0x08][3] & 0xF0) >> 4) * 100 +
+                         ((key->srix4k->eeprom[0x08][2] & 0xF0) >> 4) * 10 +
+                         (key->srix4k->eeprom[0x08][2] & 0x0F);
+                uint32_t el = days_difference(dd, mm, yy);
+                block[2] = (uint8_t)((el / 1000 % 10) * 16 + (el / 100 % 10));
+                block[3] = (uint8_t)((el / 10 % 10) * 16 + (el % 10));
                 calculateBlockChecksum(block, i);
                 break;
             }
-            case 0x11: case 0x15: case 0x40: case 0x44:
-                block[1]=key->srix4k->eeprom[0x07][1];
-                block[2]=key->srix4k->eeprom[0x07][2];
-                block[3]=key->srix4k->eeprom[0x07][3];
-                calculateBlockChecksum(block,i); break;
-            case 0x22: case 0x26: case 0x51: case 0x55:
-                block[1]=key->srix4k->eeprom[0x08][2];
-                block[2]=key->srix4k->eeprom[0x08][1];
-                block[3]=key->srix4k->eeprom[0x08][3];
-                calculateBlockChecksum(block,i); encode_decode_block(block); break;
-            case 0x12: case 0x16: case 0x41: case 0x45:
-                block[1]=0x00; block[2]=0x00; block[3]=0x01;
-                calculateBlockChecksum(block,i); break;
-            case 0x13: case 0x17: case 0x42: case 0x46:
-                block[1]=0x04; block[2]=0x00; block[3]=0x13;
-                calculateBlockChecksum(block,i); break;
-            case 0x18: case 0x1C: case 0x47: case 0x4B:
-                block[1]=0x00; block[2]=0xFE; block[3]=0xDC;
-                calculateBlockChecksum(block,i); encode_decode_block(block); break;
-            case 0x1D: case 0x48: case 0x4C:
-                block[1]=0x00; block[2]=0x01; block[3]=0x23;
-                calculateBlockChecksum(block,i); encode_decode_block(block); break;
+            case 0x11:
+            case 0x15:
+            case 0x40:
+            case 0x44:
+                block[1] = key->srix4k->eeprom[0x07][1];
+                block[2] = key->srix4k->eeprom[0x07][2];
+                block[3] = key->srix4k->eeprom[0x07][3];
+                calculateBlockChecksum(block, i);
+                break;
+            case 0x22:
+            case 0x26:
+            case 0x51:
+            case 0x55:
+                block[1] = key->srix4k->eeprom[0x08][2];
+                block[2] = key->srix4k->eeprom[0x08][1];
+                block[3] = key->srix4k->eeprom[0x08][3];
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                break;
+            case 0x12:
+            case 0x16:
+            case 0x41:
+            case 0x45:
+                block[1] = 0x00;
+                block[2] = 0x00;
+                block[3] = 0x01;
+                calculateBlockChecksum(block, i);
+                break;
+            case 0x13:
+            case 0x17:
+            case 0x42:
+            case 0x46:
+                block[1] = 0x04;
+                block[2] = 0x00;
+                block[3] = 0x13;
+                calculateBlockChecksum(block, i);
+                break;
+            case 0x18:
+            case 0x1C:
+            case 0x47:
+            case 0x4B:
+                block[1] = 0x00;
+                block[2] = 0xFE;
+                block[3] = 0xDC;
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                break;
+            case 0x1D:
+            case 0x48:
+            case 0x4C:
+                block[1] = 0x00;
+                block[2] = 0x01;
+                block[3] = 0x23;
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                break;
             case 0x19:
-                block[1]=0x00; block[2]=0x01; block[3]=0x23;
-                calculateBlockChecksum(block,i); encode_decode_block(block);
-                calculateEncryptionKey(key); break;   // recalc after vendor block
-            case 0x21: case 0x25:
-                block[1]=0x00; block[2]=0x00; block[3]=0x00;
-                calculateBlockChecksum(block,i); encode_decode_block(block);
-                block[0]^=key->encryptionKey>>24; block[1]^=key->encryptionKey>>16;
-                block[2]^=key->encryptionKey>>8;  block[3]^=key->encryptionKey; break;
-            case 0x20: case 0x24: case 0x4F: case 0x53:
-                block[1]=0x01; block[2]=0x00; block[3]=0x00;
-                calculateBlockChecksum(block,i); encode_decode_block(block); break;
-            case 0x1A: case 0x1B: case 0x1E: case 0x1F:
-            case 0x23: case 0x27:
-            case 0x49: case 0x4A: case 0x4D: case 0x4E:
-            case 0x50: case 0x52: case 0x54: case 0x56:
-                block[1]=0x00; block[2]=0x00; block[3]=0x00;
-                calculateBlockChecksum(block,i); break;
-            default:
-                block[0]=block[1]=block[2]=block[3]=0xFF; break;
+                block[1] = 0x00;
+                block[2] = 0x01;
+                block[3] = 0x23;
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                calculateEncryptionKey(key);
+                break; // recalc after vendor block
+            case 0x21:
+            case 0x25:
+                block[1] = 0x00;
+                block[2] = 0x00;
+                block[3] = 0x00;
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                block[0] ^= key->encryptionKey >> 24;
+                block[1] ^= key->encryptionKey >> 16;
+                block[2] ^= key->encryptionKey >> 8;
+                block[3] ^= key->encryptionKey;
+                break;
+            case 0x20:
+            case 0x24:
+            case 0x4F:
+            case 0x53:
+                block[1] = 0x01;
+                block[2] = 0x00;
+                block[3] = 0x00;
+                calculateBlockChecksum(block, i);
+                encode_decode_block(block);
+                break;
+            case 0x1A:
+            case 0x1B:
+            case 0x1E:
+            case 0x1F:
+            case 0x23:
+            case 0x27:
+            case 0x49:
+            case 0x4A:
+            case 0x4D:
+            case 0x4E:
+            case 0x50:
+            case 0x52:
+            case 0x54:
+            case 0x56:
+                block[1] = 0x00;
+                block[2] = 0x00;
+                block[3] = 0x00;
+                calculateBlockChecksum(block, i);
+                break;
+            default: block[0] = block[1] = block[2] = block[3] = 0xFF; break;
         }
         if (memcmp(block, key->srix4k->eeprom[i], 4) != 0) {
             Serial.printf("[MIKAI] Resetting block %02X\n", i);
@@ -530,8 +590,7 @@ void mikai_reset_otp(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
     }
 }
 
-void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out,
-                       uint8_t eeprom_out[SRIX4K_BYTES]) {
+void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]) {
     memcpy(eeprom_out, key->srix4k->eeprom, SRIX4K_BYTES);
     *uid_out = key->srix4k->uid;
 }
@@ -549,13 +608,10 @@ int mikai_write_modified_blocks(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
         srix_flag_remove(&key->srix4k->srixFlag, 0x06);
     }
     for (uint8_t i = 0; i < SRIX4K_BLOCKS; i++) {
-        if (srix_flag_get(&key->srix4k->srixFlag, i))
-            write_block(nfc, key->srix4k, i);
+        if (srix_flag_get(&key->srix4k->srixFlag, i)) write_block(nfc, key->srix4k, i);
     }
     key->srix4k->srixFlag = srix_flag_init();
     return 0;
 }
 
-bool mikai_has_pending_writes(struct mykey_t *key) {
-    return srix_flag_isModified(&key->srix4k->srixFlag);
-}
+bool mikai_has_pending_writes(struct mykey_t *key) { return srix_flag_isModified(&key->srix4k->srixFlag); }
