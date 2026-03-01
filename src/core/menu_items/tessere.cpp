@@ -4,26 +4,27 @@
 #include <Adafruit_PN532.h>
 #include <Wire.h>
 
-static Adafruit_PN532 mifareNfc(255, 255); // I2C polling mode
+static Adafruit_PN532 mifareNfc(255, 255);
 static bool mifareNfcInit = false;
 
-// ── Struttura per i dati dump ──────────────────────────────────────────────
+// Struttura per i dati dump
 #define MIFARE_MAX_BLOCKS 256
 struct MifareDump {
     uint8_t uid[7];
     uint8_t uidLen;
     uint8_t sak;
+    uint16_t atqa;
     String tagType;
     uint8_t numSectors;
     uint8_t data[MIFARE_MAX_BLOCKS][16];
     bool blockRead[MIFARE_MAX_BLOCKS];
     uint8_t keyA[40][6];
     bool keyAFound[40];
+    uint8_t keyB[40][6];
+    bool keyBFound[40];
 };
 
 static MifareDump g_dump;
-
-// ── UI Helper ─────────────────────────────────────────────────────────────
 
 static void showMessage(const String &title, const String &body) {
     drawMainBorderWithTitle(title);
@@ -45,8 +46,7 @@ static void showMessage(const String &title, const String &body) {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
+// Logica
 static bool mifareInit() {
     if (!mifareNfcInit) {
         int sda_pin = bruceConfigPins.i2c_bus.sda;
@@ -143,33 +143,27 @@ static bool waitForMifareTag() {
     uint8_t uid[7];
     uint8_t uidLen;
 
-    unsigned long start = millis();
-    while (millis() - start < 10000) {
-        if (mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen)) {
-            memcpy(g_dump.uid, uid, uidLen);
-            g_dump.uidLen = uidLen;
-            g_dump.sak = 0x08; // default 1K
-            g_dump.tagType = getTagType(g_dump.sak);
-            g_dump.numSectors = getSectorCount(g_dump.sak);
-            return true;
-        }
-        InputHandler();
-        if (AnyKeyPress) return false;
-        delay(100);
+    if (mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 6000)) {
+        memcpy(g_dump.uid, uid, uidLen);
+        g_dump.uidLen = uidLen;
+        g_dump.sak = mifareNfc.getLastSAK();
+        g_dump.atqa = mifareNfc.getLastATQA();
+        g_dump.tagType = getTagType(g_dump.sak);
+        g_dump.numSectors = getSectorCount(g_dump.sak);
+        return true;
     }
+
     showMessage("Mifare", "No tag found.");
     return false;
 }
 
-// ── INFO ──────────────────────────────────────────────────────────────────
-
+// Da qui in poi deve estare qua il codice
 static void InfoTessera() {
     if (!mifareInit()) return;
     if (!waitForMifareTag()) return;
 
     auto keys = loadKeysFromSD();
 
-    // UID
     char uidStr[20] = "";
     for (int i = 0; i < g_dump.uidLen; i++) {
         char tmp[3];
@@ -180,52 +174,13 @@ static void InfoTessera() {
     drawMainBorderWithTitle("Info");
     setPadCursor(1, 2);
     padprintln("UID: " + String(uidStr));
+
+    char sakStr[5], atqaStr[5];
+    snprintf(sakStr, sizeof(sakStr), "%02X", g_dump.sak);
+    snprintf(atqaStr, sizeof(atqaStr), "%04X", g_dump.atqa);
+    padprintln("SAK:  0x" + String(sakStr));
+    padprintln("ATQA: 0x" + String(atqaStr));
     padprintln("Type: " + g_dump.tagType);
-    padprintln("Sectors: " + String(g_dump.numSectors));
-    padprintln("");
-    padprintln("Probing keys...");
-
-    // Prova le chiavi su ogni settore
-    memset(g_dump.keyAFound, false, sizeof(g_dump.keyAFound));
-    for (uint8_t s = 0; s < g_dump.numSectors; s++) {
-        uint8_t tb = trailerBlock(s);
-        for (auto &key : keys) {
-            if (mifareNfc.mifareclassic_AuthenticateBlock(
-                    g_dump.uid, g_dump.uidLen, tb, 0, (uint8_t *)key.data()
-                )) {
-                memcpy(g_dump.keyA[s], key.data(), 6);
-                g_dump.keyAFound[s] = true;
-                break;
-            }
-        }
-    }
-
-    // Mostra risultati
-    drawMainBorderWithTitle("Info");
-    setPadCursor(1, 2);
-    padprintln("UID: " + String(uidStr));
-    padprintln("Type: " + g_dump.tagType);
-    padprintln("");
-
-    for (uint8_t s = 0; s < g_dump.numSectors; s++) {
-        if (g_dump.keyAFound[s]) {
-            char keyStr[13];
-            snprintf(
-                keyStr,
-                sizeof(keyStr),
-                "%02X%02X%02X%02X%02X%02X",
-                g_dump.keyA[s][0],
-                g_dump.keyA[s][1],
-                g_dump.keyA[s][2],
-                g_dump.keyA[s][3],
-                g_dump.keyA[s][4],
-                g_dump.keyA[s][5]
-            );
-            padprintln("S" + String(s) + ": " + String(keyStr));
-        } else {
-            padprintln("S" + String(s) + ": no key");
-        }
-    }
 
     delay(300);
     while (!AnyKeyPress) {
@@ -233,8 +188,6 @@ static void InfoTessera() {
         delay(50);
     }
 }
-
-// ── READ ──────────────────────────────────────────────────────────────────
 
 static void ReadTessera() {
     if (!mifareInit()) return;
@@ -286,7 +239,7 @@ static void ReadTessera() {
     if (!SD.exists("/mifare")) SD.mkdir("/mifare");
     if (!SD.exists("/mifare/dump")) SD.mkdir("/mifare/dump");
 
-    String path = "/mifare/dump/" + filename + ".mfd";
+    String path = "/mifare/dump/" + filename + ".dump";
     File f = SD.open(path, FILE_WRITE);
     if (!f) {
         showMessage("Read", "SD write failed.");
@@ -305,10 +258,8 @@ static void ReadTessera() {
     }
     f.close();
 
-    showMessage("Read", "Saved to:\n/mifare/dump/" + filename + ".mfd");
+    showMessage("Read", "Saved to:\n/mifare/dump/" + filename + ".dump");
 }
-
-// ── WRITE ─────────────────────────────────────────────────────────────────
 
 static void WriteTessera() {
     if (!mifareInit()) return;
@@ -326,7 +277,7 @@ static void WriteTessera() {
         if (!entry) break;
         String name = String(entry.name());
         entry.close();
-        if (!name.endsWith(".mfd")) continue;
+        if (!name.endsWith(".dump")) continue;
 
         fileOpts.push_back(
             {name.c_str(),
@@ -401,20 +352,18 @@ static void WriteTessera() {
     dir.close();
 
     if (fileOpts.empty()) {
-        showMessage("Write", "No .mfd files\nin /mifare/dump.");
+        showMessage("Write", "No .dump files\nin /mifare/dump.");
         return;
     }
 
     loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select dump file");
 }
 
-// ── MENU ──────────────────────────────────────────────────────────────────
-
 void Tessere::optionsMenu() {
     std::vector<Option> options = {
         {"Info",  []() { InfoTessera(); },  false},
-        {"Read",  []() { ReadTessera(); },  false},
-        {"Write", []() { WriteTessera(); }, false},
+        {"Read",  []() { ReadTessera(); },  false}, //  Da vedere
+        {"Write", []() { WriteTessera(); }, false}, //  Da vedere
     };
     loopOptions(options, MENU_TYPE_SUBMENU, "Tessere");
 }
