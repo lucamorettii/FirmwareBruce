@@ -3,8 +3,8 @@
 
 // NFC brifge to Arduino_PN532_SRIX
 /**
- * Attempt INITIATE+SELECT until a tag answers, then read all 128 blocks.
- * Returns true on success.
+ * Esegue INITIATE+SELECT finché un tag risponde, poi legge tutti i 128 blocchi.
+ * Ritorna true in caso di successo.
  */
 static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
     // First call SRIX_init() to put PN532 into the right mode for ISO14443B2SR
@@ -19,7 +19,7 @@ static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
 }
 
 /**
- * Reselect after tag removal.
+ * Riseleziona il tag dopo che è stato rimosso.
  */
 static void nfc_reselect(Arduino_PN532_SRIX *nfc) {
     nfc->SRIX_init();
@@ -30,17 +30,17 @@ static void nfc_reselect(Arduino_PN532_SRIX *nfc) {
 }
 
 /**
- * Read one block with retry on tag removal.
+ * Legge un blocco con retry in caso di rimozione del tag.
  */
 static void read_block(Arduino_PN532_SRIX *nfc, uint8_t rx[4], uint8_t blockNum) {
     while (!nfc->SRIX_read_block(blockNum, rx)) {
-        Serial.printf("[MIKAI] Block %02X read failed â€“ reposition tag\n", blockNum);
+        Serial.printf("[MIKAI] Block %02X read failed - reposition tag\n", blockNum);
         nfc_reselect(nfc);
     }
 }
 
 /**
- * Write one block and verify it, retrying on mismatch or tag removal.
+ * Scrive un blocco e lo verifica, ritenta in caso di mismatch o rimozione del tag.
  */
 static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t blockNum) {
     Serial.printf("[MIKAI] Writing block %02X...\n", blockNum);
@@ -52,13 +52,13 @@ static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t 
 
         if (memcmp(target->eeprom[blockNum], check, 4) == 0) return;
 
-        Serial.printf("[MIKAI] Block %02X verify failed â€“ retrying\n", blockNum);
+        Serial.printf("[MIKAI] Block %02X verify failed - retrying\n", blockNum);
         nfc_reselect(nfc);
     }
 }
 
 // Private
-/** Bit-transpose a 4-byte block (encode = decode, same op). */
+/** Traspone i bit di un blocco da 4 byte (encode = decode, stessa operazione). */
 static void encode_decode_block(uint8_t block[4]) {
     uint8_t in[4] = {block[0], block[1], block[2], block[3]};
     block[0] = (in[0] & 0xC0);
@@ -85,7 +85,7 @@ static void calculateBlockChecksum(uint8_t block[4], uint8_t blockNum) {
                ((block[2] >> 4) & 0x0F) - (block[1] & 0x0F) - ((block[1] >> 4) & 0x0F);
 }
 
-/** Days between 1/1/1995 and the given date. */
+/** Giorni tra il 1/1/1995 e la data fornita. */
 static uint32_t days_difference(int day, int month, int year) {
     if (month < 3) {
         year--;
@@ -245,7 +245,7 @@ void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen) {
         strncat(out, tmp, outLen - strlen(out) - 1);
     }
 
-    // Production date (BCD)
+    // Data di produzione (BCD)
     int dd = ((key->srix4k->eeprom[0x08][0] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][0] & 0x0F);
     int mm = ((key->srix4k->eeprom[0x08][1] & 0xF0) >> 4) * 10 + (key->srix4k->eeprom[0x08][1] & 0x0F);
     int yy = (key->srix4k->eeprom[0x08][3] & 0x0F) * 1000 +
@@ -254,7 +254,7 @@ void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen) {
     snprintf(tmp, sizeof(tmp), "Prod: %02d/%02d/%04d\n", dd, mm, yy);
     strncat(out, tmp, outLen - strlen(out) - 1);
 
-    // Transaction history (sorted, same as original)
+    // Storico transazioni (ordinato, come nell'originale)
     strncat(out, "--- Transactions ---\n", outLen - strlen(out) - 1);
     uint8_t current = get_current_transaction_offset(key);
     for (uint8_t i = 0; i < 8; i++) {
@@ -317,7 +317,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
         srix_flag_add(&key->srix4k->srixFlag, 0x34 + current);
     }
 
-    // Block 0x21 â€“ new credit
+    // Block 0x21 - new credit
     key->srix4k->eeprom[0x21][1] = 0x00;
     key->srix4k->eeprom[0x21][2] = actual_credit >> 8;
     key->srix4k->eeprom[0x21][3] = (uint8_t)actual_credit;
@@ -329,7 +329,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
     key->srix4k->eeprom[0x21][3] ^= key->encryptionKey;
     srix_flag_add(&key->srix4k->srixFlag, 0x21);
 
-    // Block 0x25 â€“ mirror
+    // Block 0x25 - mirror
     key->srix4k->eeprom[0x25][1] = 0x00;
     key->srix4k->eeprom[0x25][2] = actual_credit >> 8;
     key->srix4k->eeprom[0x25][3] = (uint8_t)actual_credit;
@@ -341,7 +341,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
     key->srix4k->eeprom[0x25][3] ^= key->encryptionKey;
     srix_flag_add(&key->srix4k->srixFlag, 0x25);
 
-    // Block 0x23 â€“ precedent credit
+    // Block 0x23 - precedent credit
     key->srix4k->eeprom[0x23][1] = 0x00;
     key->srix4k->eeprom[0x23][2] = precedent_credit >> 8;
     key->srix4k->eeprom[0x23][3] = (uint8_t)precedent_credit;
@@ -349,7 +349,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
     encode_decode_block(key->srix4k->eeprom[0x23]);
     srix_flag_add(&key->srix4k->srixFlag, 0x23);
 
-    // Block 0x27 â€“ mirror
+    // Block 0x27 - mirror
     key->srix4k->eeprom[0x27][1] = 0x00;
     key->srix4k->eeprom[0x27][2] = precedent_credit >> 8;
     key->srix4k->eeprom[0x27][3] = (uint8_t)precedent_credit;
@@ -357,7 +357,7 @@ int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
     encode_decode_block(key->srix4k->eeprom[0x27]);
     srix_flag_add(&key->srix4k->srixFlag, 0x27);
 
-    // Block 0x3C â€“ transaction pointer
+    // Block 0x3C - transaction pointer
     key->srix4k->eeprom[0x3C][1] = current;
     key->srix4k->eeprom[0x3C][2] = 0;
     key->srix4k->eeprom[0x3C][3] = 0;

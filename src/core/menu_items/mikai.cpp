@@ -3,27 +3,34 @@
 #include "core/mykeyboard.h"
 #include <Wire.h>
 
-static Arduino_PN532_SRIX nfc(255, 255); // polling mode, no IRQ/RST pins
-static bool nfcIsInit = false;           // Bool per sapere se è gia stato inizializzato ed è tutto ok
+static Arduino_PN532_SRIX nfc(255, 255);
+static bool nfcIsInit = false;
 
-// Variabili per le funzionalità SRIX mikai
 static struct srix_t srix;
 static struct mykey_t srixKey = {&srix, 0};
 
-// Funzione per visualizzare titolo e messaggio
+// Funzione per visualizzare titolo e messaggio con supporto \n
 static void showMessage(const String &title, const String &body) {
     drawMainBorderWithTitle(title);
     setPadCursor(1, 2);
-    padprintln(body);
+
+    String tmp = body;
+    int start = 0;
+    int idx;
+    while ((idx = tmp.indexOf('\n', start)) != -1) {
+        padprintln(tmp.substring(start, idx));
+        start = idx + 1;
+    }
+    padprintln(tmp.substring(start));
+
     delay(300);
-    keyStroke k;
-    do {
+    while (!AnyKeyPress) {
         InputHandler();
         delay(50);
-    } while (!AnyKeyPress);
+    }
 }
 
-// Leggo il tag srix
+// Funzione per leggere il dump nelle voci del menu
 static bool loadTag() {
     drawMainBorderWithTitle("Mikai");
     setPadCursor(1, 2);
@@ -36,8 +43,6 @@ static bool loadTag() {
     return true;
 }
 
-// AZIONI MENU
-// Mostra info del tag
 static void actionInfo() {
     if (!loadTag()) return;
     char buf[800];
@@ -46,7 +51,6 @@ static void actionInfo() {
     drawMainBorderWithTitle("Info");
     setPadCursor(1, 2);
 
-    // Stampa riga per riga
     char *line = strtok(buf, "\n");
     while (line != nullptr) {
         padprintln(line);
@@ -60,13 +64,12 @@ static void actionInfo() {
     }
 }
 
-// Scrive da RAM a Key
 static void actionWrite() {
     if (!mikai_has_pending_writes(&srixKey)) {
         showMessage("Write", "No pending changes.");
         return;
     }
-    drawMainBorderWithTitle("Mikai");
+    drawMainBorderWithTitle("Write");
     setPadCursor(1, 2);
     padprintln("Writing blocks...");
     padprintln("Keep tag on reader!");
@@ -74,7 +77,6 @@ static void actionWrite() {
     showMessage("Write", "Done!");
 }
 
-// Scrivo il nuovo credito in RAM e poi se vuoi puoi scriverlo
 static void actionAddCredit() {
     if (!loadTag()) return;
 
@@ -102,7 +104,10 @@ static void actionAddCredit() {
         opts.push_back(
             {amounts[i].label,
              [c]() {
-                 uint8_t d = 1, m = 1, y = 26; // Data iniziale
+                 uint8_t d = rtc.getDay();
+                 uint8_t m = rtc.getMonth();
+                 uint8_t y = rtc.getYear() - 2000;
+
                  int res = mikai_add_cents(&srixKey, c, d, m, y);
                  if (res == 0) {
                      uint16_t newc = mikai_get_current_credit(&srixKey);
@@ -113,7 +118,7 @@ static void actionAddCredit() {
                          {"Write to tag", []() { actionWrite(); }, false},
                          {"Cancel",       []() {},                 false},
                      };
-                     loopOptions(confirm, MENU_TYPE_SUBMENU, String(buf).c_str());
+                     loopOptions(confirm, MENU_TYPE_SUBMENU, buf);
                  } else {
                      char buf[40];
                      snprintf(buf, sizeof(buf), "Error %d", res);
@@ -126,12 +131,63 @@ static void actionAddCredit() {
     loopOptions(opts, MENU_TYPE_SUBMENU, "Add credit");
 }
 
+static void actionSetCredit() {
+    if (!loadTag()) return;
+
+    struct {
+        const char *label;
+        uint16_t cents;
+    } amounts[] = {
+        {"0.50 EUR",  50  },
+        {"1.00 EUR",  100 },
+        {"2.00 EUR",  200 },
+        {"5.00 EUR",  500 },
+        {"10.00 EUR", 1000},
+        {"20.00 EUR", 2000},
+        {"50.00 EUR", 5000},
+    };
+
+    const int N = sizeof(amounts) / sizeof(amounts[0]);
+
+    std::vector<Option> opts;
+    for (int i = 0; i < N; i++) {
+        uint16_t c = amounts[i].cents;
+        opts.push_back(
+            {amounts[i].label,
+             [c]() {
+                 uint8_t d = 1;
+                 uint8_t m = 1;
+                 uint8_t y = 2026;
+
+                 int res = mikai_set_cents(&srixKey, c, d, m, y);
+                 if (res == 0) {
+                     uint16_t newc = mikai_get_current_credit(&srixKey);
+                     char buf[40];
+                     snprintf(buf, sizeof(buf), "Credit set: %u.%02u EUR", newc / 100, newc % 100);
+
+                     std::vector<Option> confirm = {
+                         {"Write to tag", []() { actionWrite(); }, false},
+                         {"Cancel",       []() {},                 false},
+                     };
+                     loopOptions(confirm, MENU_TYPE_SUBMENU, buf);
+                 } else {
+                     char buf[40];
+                     snprintf(buf, sizeof(buf), "Error %d", res);
+                     showMessage("Set credit", String(buf));
+                 }
+             },
+             false}
+        );
+    }
+    loopOptions(opts, MENU_TYPE_SUBMENU, "Set credit");
+}
+
 static void actionExportVendor() {
     if (!loadTag()) return;
 
     uint8_t buf[8];
     if (mikai_export_vendor(&srixKey, buf) < 0) {
-        showMessage("Export vendor", "Key is not bound to any vendor.");
+        showMessage("Export vendor", "Key is not bound\nto any vendor.");
         return;
     }
 
@@ -141,12 +197,10 @@ static void actionExportVendor() {
         return;
     }
 
-    // Crea la cartella se non esiste
     if (!SD.exists("/vendor")) { SD.mkdir("/vendor"); }
 
     String path = "/vendor/mikai_" + filename + ".bin";
     File f = SD.open(path, FILE_WRITE);
-
     if (!f) {
         showMessage("Export vendor", "SD write failed.");
         return;
@@ -154,7 +208,7 @@ static void actionExportVendor() {
     f.write(buf, 8);
     f.close();
 
-    showMessage("Export vendor", "Saved to: " + path);
+    showMessage("Export vendor", "Saved to:\n" + path);
 }
 
 static void actionReset() {
@@ -170,17 +224,14 @@ static void actionReset() {
 }
 
 static void actionImportVendor() {
-    if (!loadTag()) return; // Prima prova a leggere il tag
+    if (!loadTag()) return;
 
-    if (!mikai_is_reset(&srixKey)) {    //Se la srix non è vergine non permettere l'import
-        showMessage("Import vendor",
-            "Key is already bound!\n\n"
-            "Do a Reset first,\n"
-            "then import vendor.");
+    if (!mikai_is_reset(&srixKey)) {
+        showMessage("Import vendor", "Key is already bound!\nDo a Reset first,\nthen import vendor.");
         return;
     }
 
-    if (!SD.exists("/vendor")) { // Se non c'è la cartella non puoi fare l'import
+    if (!SD.exists("/vendor")) {
         showMessage("Import vendor", "No /vendor folder on SD.");
         return;
     }
@@ -189,7 +240,7 @@ static void actionImportVendor() {
     std::vector<Option> fileOpts;
 
     while (true) {
-        File entry = dir.openNextFile();    // Legge i file nella cartella /vendor
+        File entry = dir.openNextFile();
         if (!entry) break;
         String name = String(entry.name());
         entry.close();
@@ -200,30 +251,26 @@ static void actionImportVendor() {
              [name]() {
                  String path = "/vendor/" + name;
                  File f = SD.open(path, FILE_READ);
-                 if (!f) {  // Se non riesce ad aprire il file, mostra errore
+                 if (!f) {
                      showMessage("Import vendor", "Cannot open file.");
                      return;
                  }
-                 if (f.size() != 8) { // Se il file non è di 8 byte, mostra errore
+                 if (f.size() != 8) {
                      f.close();
                      showMessage("Import vendor", "File must be 8 bytes.");
                      return;
                  }
 
-                 //Legge i primi 8 byte e chiude il file
                  uint8_t b18[4], b19[4];
                  f.read(b18, 4);
                  f.read(b19, 4);
                  f.close();
 
-                 // Mostra i byte che sta per importare e chiede conferma
                  char preview[80];
                  snprintf(
                      preview,
                      sizeof(preview),
-                     "B18: %02X %02X %02X %02X\n"
-                     "B19: %02X %02X %02X %02X\n\n"
-                     "Confirm?",
+                     "B18: %02X %02X %02X %02X\nB19: %02X %02X %02X %02X\nConfirm?",
                      b18[0],
                      b18[1],
                      b18[2],
@@ -234,7 +281,7 @@ static void actionImportVendor() {
                      b19[3]
                  );
 
-                 std::vector<Option> confirm = {    //Menu di conferma si o no
+                 std::vector<Option> confirm = {
                      {"Yes, import",
                       [b18, b19]() mutable {
                           mikai_import_vendor(&srixKey, b18, b19);
@@ -250,7 +297,7 @@ static void actionImportVendor() {
                               c % 100
                           );
 
-                          std::vector<Option> writeOpts = { //Propone di scrivere le modifiche dopo l'import o annullare
+                          std::vector<Option> writeOpts = {
                               {"Write to tag", []() { actionWrite(); }, false},
                               {"Cancel", []() {}, false},
                           };
@@ -265,16 +312,15 @@ static void actionImportVendor() {
     }
     dir.close();
 
-    if (fileOpts.empty()) { //Se non ci sono file .bin, mostra messaggio
-        showMessage("Import vendor", "No .bin files in /vendor.");
+    if (fileOpts.empty()) {
+        showMessage("Import vendor", "No .bin files\nin /vendor.");
         return;
     }
 
-    loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select vendor file"); //Mostra il menu con i file .bin da importare
+    loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select vendor file");
 }
 
 void Mikai::optionsMenu() {
-    // Inizializzo il PN532
     if (!nfcIsInit) {
         int sda_pin = bruceConfigPins.i2c_bus.sda;
         int scl_pin = bruceConfigPins.i2c_bus.scl;
@@ -291,9 +337,10 @@ void Mikai::optionsMenu() {
     std::vector<Option> options = {
         {"Info",          []() { actionInfo(); },         false},
         {"Add credit",    []() { actionAddCredit(); },    false},
+        {"Set credit",    []() { actionSetCredit(); },    false},
         {"Reset",         []() { actionReset(); },        false},
         {"Export vendor", []() { actionExportVendor(); }, false},
-        {"Import vendor", []() { actionImportVendor();},  false},
+        {"Import vendor", []() { actionImportVendor(); }, false},
     };
     loopOptions(options, MENU_TYPE_SUBMENU, "Mikai");
 }
