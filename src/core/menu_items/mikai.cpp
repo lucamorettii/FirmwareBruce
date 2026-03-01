@@ -169,26 +169,109 @@ static void actionReset() {
     loopOptions(confirm, MENU_TYPE_SUBMENU, "Write reset?");
 }
 
-/*
 static void actionImportVendor() {
-    if (!loadTag()) return;
+    if (!loadTag()) return; // Prima prova a leggere il tag
 
-    showMessage(
-        "Import vendor",
-        "Not yet implemented.\n\n"
-        "To use: edit Mikai.cpp,\n"
-        "replace the example bytes\n"
-        "in actionImportVendor()\n"
-        "with your vendor blocks."
-    );
+    if (!mikai_is_reset(&srixKey)) {    //Se la srix non è vergine non permettere l'import
+        showMessage("Import vendor",
+            "Key is already bound!\n\n"
+            "Do a Reset first,\n"
+            "then import vendor.");
+        return;
+    }
 
-    // Example call (uncomment and fill real values):
-    // uint8_t b18[4] = {0xXX, 0xXX, 0xXX, 0xXX};
-    // uint8_t b19[4] = {0xXX, 0xXX, 0xXX, 0xXX};
-    // mikai_import_vendor(&srixKey, b18, b19);
-    // showMessage("Import vendor", "Done! Press Write to save.");
+    if (!SD.exists("/vendor")) { // Se non c'è la cartella non puoi fare l'import
+        showMessage("Import vendor", "No /vendor folder on SD.");
+        return;
+    }
+
+    File dir = SD.open("/vendor");
+    std::vector<Option> fileOpts;
+
+    while (true) {
+        File entry = dir.openNextFile();    // Legge i file nella cartella /vendor
+        if (!entry) break;
+        String name = String(entry.name());
+        entry.close();
+        if (!name.endsWith(".bin")) continue;
+
+        fileOpts.push_back(
+            {name.c_str(),
+             [name]() {
+                 String path = "/vendor/" + name;
+                 File f = SD.open(path, FILE_READ);
+                 if (!f) {  // Se non riesce ad aprire il file, mostra errore
+                     showMessage("Import vendor", "Cannot open file.");
+                     return;
+                 }
+                 if (f.size() != 8) { // Se il file non è di 8 byte, mostra errore
+                     f.close();
+                     showMessage("Import vendor", "File must be 8 bytes.");
+                     return;
+                 }
+
+                 //Legge i primi 8 byte e chiude il file
+                 uint8_t b18[4], b19[4];
+                 f.read(b18, 4);
+                 f.read(b19, 4);
+                 f.close();
+
+                 // Mostra i byte che sta per importare e chiede conferma
+                 char preview[80];
+                 snprintf(
+                     preview,
+                     sizeof(preview),
+                     "B18: %02X %02X %02X %02X\n"
+                     "B19: %02X %02X %02X %02X\n\n"
+                     "Confirm?",
+                     b18[0],
+                     b18[1],
+                     b18[2],
+                     b18[3],
+                     b19[0],
+                     b19[1],
+                     b19[2],
+                     b19[3]
+                 );
+
+                 std::vector<Option> confirm = {    //Menu di conferma si o no
+                     {"Yes, import",
+                      [b18, b19]() mutable {
+                          mikai_import_vendor(&srixKey, b18, b19);
+
+                          uint16_t c = mikai_get_current_credit(&srixKey);
+                          char msg[60];
+                          snprintf(
+                              msg,
+                              sizeof(msg),
+                              "Done!\nNew SK: %08lX\nCredit: %u.%02u EUR",
+                              srixKey.encryptionKey,
+                              c / 100,
+                              c % 100
+                          );
+
+                          std::vector<Option> writeOpts = { //Propone di scrivere le modifiche dopo l'import o annullare
+                              {"Write to tag", []() { actionWrite(); }, false},
+                              {"Cancel", []() {}, false},
+                          };
+                          loopOptions(writeOpts, MENU_TYPE_SUBMENU, msg);
+                      }, false},
+                     {"Cancel", []() {}, false},
+                 };
+                 loopOptions(confirm, MENU_TYPE_SUBMENU, preview);
+             },
+             false}
+        );
+    }
+    dir.close();
+
+    if (fileOpts.empty()) { //Se non ci sono file .bin, mostra messaggio
+        showMessage("Import vendor", "No .bin files in /vendor.");
+        return;
+    }
+
+    loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select vendor file"); //Mostra il menu con i file .bin da importare
 }
-*/
 
 void Mikai::optionsMenu() {
     // Inizializzo il PN532
@@ -210,7 +293,7 @@ void Mikai::optionsMenu() {
         {"Add credit",    []() { actionAddCredit(); },    false},
         {"Reset",         []() { actionReset(); },        false},
         {"Export vendor", []() { actionExportVendor(); }, false},
-        {"Import vendor", []() {},                        false},
+        {"Import vendor", []() { actionImportVendor();},  false},
     };
     loopOptions(options, MENU_TYPE_SUBMENU, "Mikai");
 }
