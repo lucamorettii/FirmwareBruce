@@ -7,8 +7,8 @@
 class Tessere : public MenuItemInterface {
 public:
     Tessere() : MenuItemInterface("Tessere") {}
-    void drawIcon(float scale);
-    void optionsMenu();
+    void drawIcon(float scale) override;
+    void optionsMenu() override;
     bool hasTheme() { return bruceConfig.theme.tessere; }
     String themePath() { return bruceConfig.theme.paths.tessere; }
 };

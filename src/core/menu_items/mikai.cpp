@@ -104,9 +104,9 @@ static void actionAddCredit() {
         opts.push_back(
             {amounts[i].label,
              [c]() {
-                 uint8_t d = rtc.getDay();
-                 uint8_t m = rtc.getMonth();
-                 uint8_t y = rtc.getYear() - 2000;
+                 uint8_t d = 1;
+                 uint8_t m = 1;
+                 uint8_t y = 26;
 
                  int res = mikai_add_cents(&srixKey, c, d, m, y);
                  if (res == 0) {
@@ -157,7 +157,7 @@ static void actionSetCredit() {
              [c]() {
                  uint8_t d = 1;
                  uint8_t m = 1;
-                 uint8_t y = 2026;
+                 uint8_t y = 26;
 
                  int res = mikai_set_cents(&srixKey, c, d, m, y);
                  if (res == 0) {
@@ -223,6 +223,7 @@ static void actionReset() {
     loopOptions(confirm, MENU_TYPE_SUBMENU, "Write reset?");
 }
 
+// Non funziona
 static void actionImportVendor() {
     if (!loadTag()) return;
 

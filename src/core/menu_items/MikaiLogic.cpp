@@ -192,7 +192,7 @@ bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
     for (uint8_t i = 0; i < SRIX4K_BLOCKS; i++) read_block(nfc, key->srix4k->eeprom[i], i);
 
     calculateEncryptionKey(key);
-    Serial.printf("[MIKAI] SK: %08X\n", key->encryptionKey);
+    Serial.printf("[MIKAI] SK: %08lX\n", key->encryptionKey);
     return true;
 }
 
