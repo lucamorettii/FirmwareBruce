@@ -268,10 +268,17 @@ static void actionImportVendor() {
 
                  char preview[80];
                  snprintf(
-                     preview, sizeof(preview),
+                     preview,
+                     sizeof(preview),
                      "B18: %02X %02X %02X %02X\nB19: %02X %02X %02X %02X\nConfirm?",
-                     ab18[0], ab18[1], ab18[2], ab18[3],
-                     ab19[0], ab19[1], ab19[2], ab19[3]
+                     ab18[0],
+                     ab18[1],
+                     ab18[2],
+                     ab18[3],
+                     ab19[0],
+                     ab19[1],
+                     ab19[2],
+                     ab19[3]
                  );
 
                  std::vector<Option> confirm = {

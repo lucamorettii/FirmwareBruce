@@ -146,8 +146,8 @@ static bool waitForMifareTag() {
     if (mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 6000)) {
         memcpy(g_dump.uid, uid, uidLen);
         g_dump.uidLen = uidLen;
-        g_dump.sak = mifareNfc.getLastSAK();
-        g_dump.atqa = mifareNfc.getLastATQA();
+        // g_dump.sak = mifareNfc.getLastSAK();
+        // g_dump.atqa = mifareNfc.getLastATQA();
         g_dump.tagType = getTagType(g_dump.sak);
         g_dump.numSectors = getSectorCount(g_dump.sak);
         return true;
