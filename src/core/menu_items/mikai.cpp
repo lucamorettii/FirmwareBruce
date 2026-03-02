@@ -223,7 +223,6 @@ static void actionReset() {
     loopOptions(confirm, MENU_TYPE_SUBMENU, "Write reset?");
 }
 
-// Non funziona
 static void actionImportVendor() {
     if (!loadTag()) return;
 
@@ -262,47 +261,39 @@ static void actionImportVendor() {
                      return;
                  }
 
-                 uint8_t b18[4], b19[4];
-                 f.read(b18, 4);
-                 f.read(b19, 4);
+                 std::array<uint8_t, 4> ab18, ab19;
+                 f.read(ab18.data(), 4);
+                 f.read(ab19.data(), 4);
                  f.close();
 
                  char preview[80];
                  snprintf(
-                     preview,
-                     sizeof(preview),
+                     preview, sizeof(preview),
                      "B18: %02X %02X %02X %02X\nB19: %02X %02X %02X %02X\nConfirm?",
-                     b18[0],
-                     b18[1],
-                     b18[2],
-                     b18[3],
-                     b19[0],
-                     b19[1],
-                     b19[2],
-                     b19[3]
+                     ab18[0], ab18[1], ab18[2], ab18[3],
+                     ab19[0], ab19[1], ab19[2], ab19[3]
                  );
 
                  std::vector<Option> confirm = {
                      {"Yes, import",
-                      [b18, b19]() mutable {
-                          mikai_import_vendor(&srixKey, b18, b19);
+                      [ab18, ab19]() mutable {
+                          drawMainBorderWithTitle("Import vendor");
+                          setPadCursor(1, 2);
+                          padprintln("Place tag on reader...");
 
-                          uint16_t c = mikai_get_current_credit(&srixKey);
-                          char msg[60];
-                          snprintf(
-                              msg,
-                              sizeof(msg),
-                              "Done!\nNew SK: %08lX\nCredit: %u.%02u EUR",
-                              srixKey.encryptionKey,
-                              c / 100,
-                              c % 100
-                          );
+                          if (!mikai_read_tag(&srixKey, &nfc)) {
+                              showMessage("Import vendor", "Tag read failed.\nRetry.");
+                              return;
+                          }
 
-                          std::vector<Option> writeOpts = {
-                              {"Write to tag", []() { actionWrite(); }, false},
-                              {"Cancel", []() {}, false},
-                          };
-                          loopOptions(writeOpts, MENU_TYPE_SUBMENU, msg);
+                          if (!mikai_is_reset(&srixKey)) {
+                              showMessage("Import vendor", "Tag is no longer\nin reset state!");
+                              return;
+                          }
+
+                          mikai_import_vendor(&srixKey, ab18.data(), ab19.data());
+                          mikai_write_modified_blocks(&srixKey, &nfc);
+                          showMessage("Import vendor", "Done!\nNow use Add Credit\nto load credit.");
                       }, false},
                      {"Cancel", []() {}, false},
                  };

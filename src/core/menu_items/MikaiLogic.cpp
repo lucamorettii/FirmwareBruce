@@ -396,34 +396,37 @@ int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
 }
 
 void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]) {
-    // Decode 21/25 with old SK
-    for (int b = 0; b < 4; b++) {
-        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8 * (3 - b)));
-        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8 * (3 - b)));
-    }
-    memcpy(key->srix4k->eeprom[0x18], block18, SRIX_BLOCK_LENGTH);
+    //memcpy(key->srix4k->eeprom[0x18], block18, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x18);
     memcpy(key->srix4k->eeprom[0x19], block19, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x19);
+
     calculateEncryptionKey(key);
-    // Re-encode 21/25 with new SK
-    for (int b = 0; b < 4; b++) {
-        key->srix4k->eeprom[0x21][b] ^= (key->encryptionKey >> (8 * (3 - b)));
-        key->srix4k->eeprom[0x25][b] ^= (key->encryptionKey >> (8 * (3 - b)));
+
+    // Scrive credito 0 cifrato con la nuova SK
+    for (uint8_t blk : {(uint8_t)0x21, (uint8_t)0x25}) {
+        uint8_t block[4] = {0x00, 0x00, 0x00, 0x00};
+        calculateBlockChecksum(block, blk);
+        encode_decode_block(block);
+        block[0] ^= key->encryptionKey >> 24;
+        block[1] ^= key->encryptionKey >> 16;
+        block[2] ^= key->encryptionKey >> 8;
+        block[3] ^= key->encryptionKey;
+        memcpy(key->srix4k->eeprom[blk], block, 4);
+        srix_flag_add(&key->srix4k->srixFlag, blk);
     }
-    srix_flag_add(&key->srix4k->srixFlag, 0x21);
-    srix_flag_add(&key->srix4k->srixFlag, 0x25);
-    // Mirror to 1C/1D + fix checksums
-    memcpy(key->srix4k->eeprom[0x1C], key->srix4k->eeprom[0x18], SRIX_BLOCK_LENGTH);
-    memcpy(key->srix4k->eeprom[0x1D], key->srix4k->eeprom[0x19], SRIX_BLOCK_LENGTH);
-    srix_flag_add(&key->srix4k->srixFlag, 0x1C);
-    srix_flag_add(&key->srix4k->srixFlag, 0x1D);
+
+    // Mirror 18/19 → 1C/1D con checksum
+    memcpy(key->srix4k->eeprom[0x1C], block18, SRIX_BLOCK_LENGTH);
+    memcpy(key->srix4k->eeprom[0x1D], block19, SRIX_BLOCK_LENGTH);
     encode_decode_block(key->srix4k->eeprom[0x1C]);
     encode_decode_block(key->srix4k->eeprom[0x1D]);
     calculateBlockChecksum(key->srix4k->eeprom[0x1C], 0x1C);
     calculateBlockChecksum(key->srix4k->eeprom[0x1D], 0x1D);
     encode_decode_block(key->srix4k->eeprom[0x1C]);
     encode_decode_block(key->srix4k->eeprom[0x1D]);
+    srix_flag_add(&key->srix4k->srixFlag, 0x1C);
+    srix_flag_add(&key->srix4k->srixFlag, 0x1D);
 }
 
 int mikai_export_vendor(struct mykey_t *key, uint8_t buffer[8]) {
