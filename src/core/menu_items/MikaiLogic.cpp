@@ -396,7 +396,7 @@ int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t mo
 }
 
 void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]) {
-    //memcpy(key->srix4k->eeprom[0x18], block18, SRIX_BLOCK_LENGTH);
+    memcpy(key->srix4k->eeprom[0x18], block18, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x18);
     memcpy(key->srix4k->eeprom[0x19], block19, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x19);
