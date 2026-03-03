@@ -227,7 +227,7 @@ static void actionImportVendor() {
     if (!loadTag()) return;
 
     if (!mikai_is_reset(&srixKey)) {
-        showMessage("Import vendor", "Key is already bound!\nDo a Reset first,\nthen import vendor.");
+        showMessage("Import vendor", "Key is already bound!\nDo a Reset first, then import vendor.");
         return;
     }
 
@@ -266,24 +266,9 @@ static void actionImportVendor() {
                  f.read(ab19.data(), 4);
                  f.close();
 
-                 char preview[80];
-                 snprintf(
-                     preview,
-                     sizeof(preview),
-                     "B18: %02X %02X %02X %02X\nB19: %02X %02X %02X %02X\nConfirm?",
-                     ab18[0],
-                     ab18[1],
-                     ab18[2],
-                     ab18[3],
-                     ab19[0],
-                     ab19[1],
-                     ab19[2],
-                     ab19[3]
-                 );
-
                  std::vector<Option> confirm = {
                      {"Yes, import",
-                      [ab18, ab19]() mutable {
+                      [ab18, ab19]() { // rimosso mutable, non serve
                           drawMainBorderWithTitle("Import vendor");
                           setPadCursor(1, 2);
                           padprintln("Place tag on reader...");
@@ -299,12 +284,17 @@ static void actionImportVendor() {
                           }
 
                           mikai_import_vendor(&srixKey, ab18.data(), ab19.data());
-                          mikai_write_modified_blocks(&srixKey, &nfc);
+
+                          if (mikai_write_modified_blocks(&srixKey, &nfc) < 0) {
+                              showMessage("Import vendor", "Write failed!\nRetry.");
+                              return;
+                          }
+
                           showMessage("Import vendor", "Done!\nNow use Add Credit\nto load credit.");
                       }, false},
                      {"Cancel", []() {}, false},
                  };
-                 loopOptions(confirm, MENU_TYPE_SUBMENU, preview);
+                 loopOptions(confirm, MENU_TYPE_SUBMENU, "");
              },
              false}
         );

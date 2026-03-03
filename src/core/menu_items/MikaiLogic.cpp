@@ -2,10 +2,6 @@
 #include <Arduino.h>
 
 // NFC brifge to Arduino_PN532_SRIX
-/**
- * Esegue INITIATE+SELECT finché un tag risponde, poi legge tutti i 128 blocchi.
- * Ritorna true in caso di successo.
- */
 static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
     // First call SRIX_init() to put PN532 into the right mode for ISO14443B2SR
     if (!nfc->SRIX_init()) return false;
@@ -18,9 +14,6 @@ static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
     return false;
 }
 
-/**
- * Riseleziona il tag dopo che è stato rimosso.
- */
 static void nfc_reselect(Arduino_PN532_SRIX *nfc) {
     nfc->SRIX_init();
     for (int i = 0; i < 60; i++) {
@@ -29,9 +22,6 @@ static void nfc_reselect(Arduino_PN532_SRIX *nfc) {
     }
 }
 
-/**
- * Legge un blocco con retry in caso di rimozione del tag.
- */
 static void read_block(Arduino_PN532_SRIX *nfc, uint8_t rx[4], uint8_t blockNum) {
     while (!nfc->SRIX_read_block(blockNum, rx)) {
         Serial.printf("[MIKAI] Block %02X read failed - reposition tag\n", blockNum);
@@ -39,9 +29,6 @@ static void read_block(Arduino_PN532_SRIX *nfc, uint8_t rx[4], uint8_t blockNum)
     }
 }
 
-/**
- * Scrive un blocco e lo verifica, ritenta in caso di mismatch o rimozione del tag.
- */
 static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t blockNum) {
     Serial.printf("[MIKAI] Writing block %02X...\n", blockNum);
     while (true) {
@@ -58,7 +45,6 @@ static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t 
 }
 
 // Private
-/** Traspone i bit di un blocco da 4 byte (encode = decode, stessa operazione). */
 static void encode_decode_block(uint8_t block[4]) {
     uint8_t in[4] = {block[0], block[1], block[2], block[3]};
     block[0] = (in[0] & 0xC0);
@@ -79,13 +65,11 @@ static void encode_decode_block(uint8_t block[4]) {
     block[3] |= (in[3] & 0x03);
 }
 
-/** block[0] = checksum byte. */
 static void calculateBlockChecksum(uint8_t block[4], uint8_t blockNum) {
     block[0] = 0xFF - blockNum - (block[3] & 0x0F) - ((block[3] >> 4) & 0x0F) - (block[2] & 0x0F) -
                ((block[2] >> 4) & 0x0F) - (block[1] & 0x0F) - ((block[1] >> 4) & 0x0F);
 }
 
-/** Giorni tra il 1/1/1995 e la data fornita. */
 static uint32_t days_difference(int day, int month, int year) {
     if (month < 3) {
         year--;
@@ -113,35 +97,6 @@ static void calculateEncryptionKey(struct mykey_t *key) {
                                                  1u));
 
     key->encryptionKey = masterKey * otp;
-}
-
-static bool srix_decrease_block6(struct srix_t *target, uint32_t toDecrease) {
-    if (toDecrease == 0) return true;
-    uint32_t b6 = ((uint32_t)target->eeprom[0x06][3] << 24) | ((uint32_t)target->eeprom[0x06][2] << 16) |
-                  ((uint32_t)target->eeprom[0x06][1] << 8) | (uint32_t)target->eeprom[0x06][0];
-    if (b6 < toDecrease) return false;
-    b6 -= toDecrease;
-    target->eeprom[0x06][0] = (uint8_t)(b6);
-    target->eeprom[0x06][1] = (uint8_t)(b6 >> 8);
-    target->eeprom[0x06][2] = (uint8_t)(b6 >> 16);
-    target->eeprom[0x06][3] = (uint8_t)(b6 >> 24);
-    srix_flag_add(&target->srixFlag, 0x06);
-    return true;
-}
-
-static int srix_reset_otp_internal(struct srix_t *target) {
-    uint8_t reset[5 * SRIX_BLOCK_LENGTH];
-    memset(reset, 0xFF, sizeof(reset));
-    if (memcmp(target->eeprom[0x00], reset, sizeof(reset)) != 0) {
-        if (srix_decrease_block6(target, 0x00200000)) {
-            memset(target->eeprom[0x00], 0xFF, 5 * SRIX_BLOCK_LENGTH);
-            for (uint8_t b = 0x00; b <= 0x04; b++) srix_flag_add(&target->srixFlag, b);
-        } else {
-            Serial.println("[MIKAI] Unable to decrease block 0x06 for OTP reset.");
-            return -1;
-        }
-    }
-    return 0;
 }
 
 static uint8_t get_current_transaction_offset(struct mykey_t *key) {
@@ -401,22 +356,34 @@ void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const ui
     memcpy(key->srix4k->eeprom[0x19], block19, SRIX_BLOCK_LENGTH);
     srix_flag_add(&key->srix4k->srixFlag, 0x19);
 
+    /* Decifra 0x21 e 0x25 con la vecchia SK */
+    key->srix4k->eeprom[0x21][0] ^= key->encryptionKey >> 24;
+    key->srix4k->eeprom[0x21][1] ^= key->encryptionKey >> 16;
+    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >> 8;
+    key->srix4k->eeprom[0x21][3] ^= key->encryptionKey;
+
+    key->srix4k->eeprom[0x25][0] ^= key->encryptionKey >> 24;
+    key->srix4k->eeprom[0x25][1] ^= key->encryptionKey >> 16;
+    key->srix4k->eeprom[0x25][2] ^= key->encryptionKey >> 8;
+    key->srix4k->eeprom[0x25][3] ^= key->encryptionKey;
+
+    /* Ricalcola la chiave con il nuovo vendor */
     calculateEncryptionKey(key);
 
-    // Scrive credito 0 cifrato con la nuova SK
-    for (uint8_t blk : {(uint8_t)0x21, (uint8_t)0x25}) {
-        uint8_t block[4] = {0x00, 0x00, 0x00, 0x00};
-        calculateBlockChecksum(block, blk);
-        encode_decode_block(block);
-        block[0] ^= key->encryptionKey >> 24;
-        block[1] ^= key->encryptionKey >> 16;
-        block[2] ^= key->encryptionKey >> 8;
-        block[3] ^= key->encryptionKey;
-        memcpy(key->srix4k->eeprom[blk], block, 4);
-        srix_flag_add(&key->srix4k->srixFlag, blk);
-    }
+    /* Ricicifra 0x21 e 0x25 con la nuova SK */
+    key->srix4k->eeprom[0x21][0] ^= key->encryptionKey >> 24;
+    key->srix4k->eeprom[0x21][1] ^= key->encryptionKey >> 16;
+    key->srix4k->eeprom[0x21][2] ^= key->encryptionKey >> 8;
+    key->srix4k->eeprom[0x21][3] ^= key->encryptionKey;
+    srix_flag_add(&key->srix4k->srixFlag, 0x21);
 
-    // Mirror 18/19 → 1C/1D con checksum
+    key->srix4k->eeprom[0x25][0] ^= key->encryptionKey >> 24;
+    key->srix4k->eeprom[0x25][1] ^= key->encryptionKey >> 16;
+    key->srix4k->eeprom[0x25][2] ^= key->encryptionKey >> 8;
+    key->srix4k->eeprom[0x25][3] ^= key->encryptionKey;
+    srix_flag_add(&key->srix4k->srixFlag, 0x25);
+
+    /* Mirror 18/19 → 1C/1D */
     memcpy(key->srix4k->eeprom[0x1C], block18, SRIX_BLOCK_LENGTH);
     memcpy(key->srix4k->eeprom[0x1D], block19, SRIX_BLOCK_LENGTH);
     encode_decode_block(key->srix4k->eeprom[0x1C]);
@@ -562,6 +529,7 @@ void mikai_reset_key(struct mykey_t *key) {
                 block[2] = 0x00;
                 block[3] = 0x00;
                 calculateBlockChecksum(block, i);
+                encode_decode_block(block);
                 break;
             default: block[0] = block[1] = block[2] = block[3] = 0xFF; break;
         }
@@ -572,36 +540,6 @@ void mikai_reset_key(struct mykey_t *key) {
         }
     }
     Serial.println("[MIKAI] Key reset done.");
-}
-
-void mikai_reset_otp(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
-    if (srix_reset_otp_internal(key->srix4k) >= 0) {
-        calculateEncryptionKey(key);
-        // Write block 6 immediately (OTP counter)
-        if (srix_flag_get(&key->srix4k->srixFlag, 0x06)) {
-            write_block(nfc, key->srix4k, 0x06);
-            srix_flag_remove(&key->srix4k->srixFlag, 0x06);
-        }
-        // Write OTP blocks 0x00-0x04
-        for (uint8_t b = 0x00; b <= 0x04; b++) {
-            if (srix_flag_get(&key->srix4k->srixFlag, b)) {
-                write_block(nfc, key->srix4k, b);
-                srix_flag_remove(&key->srix4k->srixFlag, b);
-            }
-        }
-        Serial.println("[MIKAI] OTP reset done.");
-    }
-}
-
-void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]) {
-    memcpy(eeprom_out, key->srix4k->eeprom, SRIX4K_BYTES);
-    *uid_out = key->srix4k->uid;
-}
-
-void mikai_modify_block(struct mykey_t *key, const uint8_t block[4], uint8_t blockNum) {
-    if (blockNum < 0x10 || blockNum > 0x7F) return;
-    memcpy(key->srix4k->eeprom[blockNum], block, 4);
-    srix_flag_add(&key->srix4k->srixFlag, blockNum);
 }
 
 int mikai_write_modified_blocks(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
@@ -618,3 +556,51 @@ int mikai_write_modified_blocks(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
 }
 
 bool mikai_has_pending_writes(struct mykey_t *key) { return srix_flag_isModified(&key->srix4k->srixFlag); }
+
+// Non usate
+void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]) {
+    memcpy(eeprom_out, key->srix4k->eeprom, SRIX4K_BYTES);
+    *uid_out = key->srix4k->uid;
+}
+
+void mikai_modify_block(struct mykey_t *key, const uint8_t block[4], uint8_t blockNum) {
+    if (blockNum < 0x10 || blockNum > 0x7F) return;
+    memcpy(key->srix4k->eeprom[blockNum], block, 4);
+    srix_flag_add(&key->srix4k->srixFlag, blockNum);
+}
+
+static bool srix_decrease_block6(struct srix_t *target, uint32_t toDecrease) {
+    if (toDecrease == 0) return true;
+    uint32_t b6 = ((uint32_t)target->eeprom[0x06][3] << 24) | ((uint32_t)target->eeprom[0x06][2] << 16) |
+                  ((uint32_t)target->eeprom[0x06][1] << 8) | (uint32_t)target->eeprom[0x06][0];
+    if (b6 < toDecrease) return false;
+    b6 -= toDecrease;
+    target->eeprom[0x06][0] = (uint8_t)(b6);
+    target->eeprom[0x06][1] = (uint8_t)(b6 >> 8);
+    target->eeprom[0x06][2] = (uint8_t)(b6 >> 16);
+    target->eeprom[0x06][3] = (uint8_t)(b6 >> 24);
+    srix_flag_add(&target->srixFlag, 0x06);
+    return true;
+}
+
+static int srix_reset_otp_internal(struct srix_t *target) {
+    uint8_t reset[5 * SRIX_BLOCK_LENGTH];
+    memset(reset, 0xFF, sizeof(reset));
+    if (memcmp(target->eeprom[0x00], reset, sizeof(reset)) != 0) {
+        if (srix_decrease_block6(target, 0x00200000)) {
+            memset(target->eeprom[0x00], 0xFF, 5 * SRIX_BLOCK_LENGTH);
+            for (uint8_t b = 0x00; b <= 0x04; b++) srix_flag_add(&target->srixFlag, b);
+        } else {
+            Serial.println("[MIKAI] Unable to decrease block 0x06 for OTP reset.");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+void mikai_reset_otp(struct mykey_t *key) {
+    if (srix_reset_otp_internal(key->srix4k) >= 0) {
+        calculateEncryptionKey(key);
+        Serial.println("[MIKAI] OTP reset done.");
+    }
+}

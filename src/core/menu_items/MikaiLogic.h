@@ -44,9 +44,6 @@ struct mykey_t {
     uint32_t encryptionKey;
 };
 
-bool mikai_check_lock_id(struct mykey_t *key);
-bool mikai_is_reset(struct mykey_t *key);
-
 bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc);
 void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen);
 int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year);
@@ -57,8 +54,10 @@ uint16_t mikai_get_current_credit(struct mykey_t *key);
 void mikai_reset_key(struct mykey_t *key);
 void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]);
 int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year);
+bool mikai_is_reset(struct mykey_t *key);
 
 // Non usate
-void mikai_reset_otp(struct mykey_t *key, Arduino_PN532_SRIX *nfc);
+void mikai_reset_otp(struct mykey_t *key);
 void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]);
 void mikai_modify_block(struct mykey_t *key, const uint8_t block[4], uint8_t blockNum);
+bool mikai_check_lock_id(struct mykey_t *key);
