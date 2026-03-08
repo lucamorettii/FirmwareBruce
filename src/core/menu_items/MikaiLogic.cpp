@@ -1,7 +1,12 @@
 #include "MikaiLogic.h"
 #include <Arduino.h>
 
-// NFC brifge to Arduino_PN532_SRIX
+// ─── Stato del modulo ─────────────────────────────────────────────────────────
+Arduino_PN532_SRIX nfc(255, 255);
+struct srix_t srix;
+struct mykey_t srixKey = {&srix, 0};
+
+// ─── NFC bridge ──────────────────────────────────────────────────────────────
 static bool nfc_wait_and_select(Arduino_PN532_SRIX *nfc) {
     // First call SRIX_init() to put PN532 into the right mode for ISO14443B2SR
     if (!nfc->SRIX_init()) return false;
@@ -44,7 +49,7 @@ static void write_block(Arduino_PN532_SRIX *nfc, struct srix_t *target, uint8_t 
     }
 }
 
-// Private
+// ─── Private ─────────────────────────────────────────────────────────────────
 static void encode_decode_block(uint8_t block[4]) {
     uint8_t in[4] = {block[0], block[1], block[2], block[3]};
     block[0] = (in[0] & 0xC0);
@@ -114,7 +119,7 @@ static uint8_t get_current_transaction_offset(struct mykey_t *key) {
     return cur[1];
 }
 
-// Pubbliche
+// ─── Logica core (mikai_*) ────────────────────────────────────────────────────
 bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc) {
     memset(key->srix4k, 0, sizeof(struct srix_t));
     key->srix4k->srixFlag = srix_flag_init();

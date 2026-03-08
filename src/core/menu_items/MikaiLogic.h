@@ -1,13 +1,17 @@
+#pragma once
+
 #include "pn532_srix.h"
+#include <Arduino.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
-// Costanti SRIX
+// ─── Costanti SRIX ────────────────────────────────────────────────────────────
 #define SRIX4K_BLOCKS 128
 #define SRIX_BLOCK_LENGTH 4
 #define SRIX4K_BYTES (SRIX4K_BLOCKS * SRIX_BLOCK_LENGTH) // 512
 
+// ─── Strutture ────────────────────────────────────────────────────────────────
 struct srix_flag {
     uint32_t memory[4];
 };
@@ -20,15 +24,12 @@ static inline struct srix_flag srix_flag_init() {
 static inline void srix_flag_add(struct srix_flag *f, uint8_t b) {
     if (b < 128) f->memory[b / 32] |= 1u << (b % 32);
 }
-
 static inline void srix_flag_remove(struct srix_flag *f, uint8_t b) {
     if (b < 128) f->memory[b / 32] &= ~(1u << (b % 32));
 }
-
 static inline bool srix_flag_get(struct srix_flag *f, uint8_t b) {
     return b < 128 && ((f->memory[b / 32] >> (b % 32)) & 1u);
 }
-
 static inline bool srix_flag_isModified(struct srix_flag *f) {
     return (f->memory[0] | f->memory[1] | f->memory[2] | f->memory[3]) > 0;
 }
@@ -44,6 +45,12 @@ struct mykey_t {
     uint32_t encryptionKey;
 };
 
+// ─── Stato globale condiviso ──────────────────────────────────────────────────
+extern Arduino_PN532_SRIX nfc;
+extern struct srix_t srix;
+extern struct mykey_t srixKey;
+
+// ─── API logica core (mikai_*) ────────────────────────────────────────────────
 bool mikai_read_tag(struct mykey_t *key, Arduino_PN532_SRIX *nfc);
 void mikai_get_info_string(struct mykey_t *key, char *out, size_t outLen);
 int mikai_add_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year);
@@ -55,9 +62,9 @@ void mikai_reset_key(struct mykey_t *key);
 void mikai_import_vendor(struct mykey_t *key, const uint8_t block18[4], const uint8_t block19[4]);
 int mikai_set_cents(struct mykey_t *key, uint16_t cents, uint8_t day, uint8_t month, uint8_t year);
 bool mikai_is_reset(struct mykey_t *key);
+bool mikai_check_lock_id(struct mykey_t *key);
 
 // Non usate
 void mikai_reset_otp(struct mykey_t *key);
 void mikai_export_dump(struct mykey_t *key, uint64_t *uid_out, uint8_t eeprom_out[SRIX4K_BYTES]);
 void mikai_modify_block(struct mykey_t *key, const uint8_t block[4], uint8_t blockNum);
-bool mikai_check_lock_id(struct mykey_t *key);
