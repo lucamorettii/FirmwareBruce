@@ -1,19 +1,19 @@
-nrf24/RF24 @ 1.4.11
-FFat
-NTPClient
-ESP32Async/ESPAsyncWebServer
-https://github.com/rennancockles/SimpleCLI
-https://github.com/bmorcelli/SmartRC-CC1101-Driver-Lib/
-Adafruit BusIO=https://github.com/emericklaw/Adafruit-BusIO_Bruce@1.17.2-bruce.1
-h2zero/NimBLE-Arduino@^2.3.7
 https://github.com/bmorcelli/rc-switch
-https://github.com/bmorcelli/ESP-ChameleonUltra
+mikalhart/TinyGPSPlus
+Bodmer/JPEGDecoder
 Time
+bblanchon/ArduinoJson
+ESP32Time
 https://github.com/rennancockles/Arduino_MFRC522v2.git
 Adafruit PN532=https://github.com/lucamorettii/AdafruitPN532
-tinyu-zhao/FFT@^0.0.1
-bblanchon/ArduinoJson
-mikalhart/TinyGPSPlus
-ESP32Time
+h2zero/NimBLE-Arduino@^2.3.7
+nrf24/RF24 @ 1.4.11
 https://github.com/BorisKofman/IRremoteESP8266#Espressif-version-3
-Bodmer/JPEGDecoder
+tinyu-zhao/FFT@^0.0.1
+https://github.com/bmorcelli/SmartRC-CC1101-Driver-Lib/
+ESP32Async/ESPAsyncWebServer
+FFat
+Adafruit BusIO=https://github.com/emericklaw/Adafruit-BusIO_Bruce@1.17.2-bruce.1
+https://github.com/bmorcelli/ESP-ChameleonUltra
+https://github.com/rennancockles/SimpleCLI
+NTPClient

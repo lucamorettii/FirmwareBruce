@@ -118,6 +118,8 @@ void setup() {
         if (info->message_opcode == WS_TEXT) {
           Serial.printf("ws text: %s\n", (char *)data);
           client->ping();
+          // Also send a message in the message queue when we get one
+          ws.textAll("Message received: " + String((char *)data));
         }
 
       } else {

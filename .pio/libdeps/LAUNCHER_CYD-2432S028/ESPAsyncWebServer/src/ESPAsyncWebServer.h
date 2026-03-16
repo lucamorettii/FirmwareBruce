@@ -41,8 +41,6 @@
 #include <ESPAsyncTCP.h>
 #elif defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
 #include <RPAsyncTCP.h>
-#include <HTTP_Method.h>
-#include <http_parser.h>
 #else
 #error Platform not supported
 #endif
@@ -80,11 +78,10 @@ class AsyncCallbackWebHandler;
 class AsyncResponseStream;
 class AsyncMiddlewareChain;
 
-#if defined(TARGET_RP2040) || defined(TARGET_RP2350) || defined(PICO_RP2040) || defined(PICO_RP2350)
-typedef enum http_method WebRequestMethod;
-#else
-#ifndef WEBSERVER_H
-typedef enum {
+// Namespace for web request method defines
+namespace AsyncWebRequestMethod {
+// The long name here is because we sometimes include this in the global namespace
+enum AsyncWebRequestMethodType {
   HTTP_GET = 0b0000000000000001,
   HTTP_POST = 0b0000000000000010,
   HTTP_DELETE = 0b0000000000000100,
@@ -101,8 +98,23 @@ typedef enum {
   HTTP_COPY = 0b0010000000000000,
   HTTP_RESERVED = 0b0100000000000000,
   HTTP_ANY = 0b0111111111111111,
-} WebRequestMethod;
-#endif
+};
+};  // namespace AsyncWebRequestMethod
+
+typedef AsyncWebRequestMethod::AsyncWebRequestMethodType WebRequestMethod;
+typedef uint16_t WebRequestMethodComposite;
+
+// Type-safe helper functions for composite methods
+extern constexpr inline WebRequestMethodComposite operator|(WebRequestMethodComposite l, WebRequestMethod r) {
+  return l | static_cast<WebRequestMethodComposite>(r);
+};
+extern constexpr inline WebRequestMethodComposite operator|(WebRequestMethod l, WebRequestMethod r) {
+  return static_cast<WebRequestMethodComposite>(l) | r;
+};
+
+#if !defined(ASYNCWEBSERVER_NO_GLOBAL_HTTP_METHODS)
+// Import the method enum values to the global namespace
+using namespace AsyncWebRequestMethod;
 #endif
 
 #ifndef HAVE_FS_FILE_OPEN_MODE
@@ -122,7 +134,6 @@ public:
 #define RESPONSE_TRY_AGAIN          0xFFFFFFFF
 #define RESPONSE_STREAM_BUFFER_SIZE 1460
 
-typedef uint16_t WebRequestMethodComposite;
 typedef std::function<void(void)> ArDisconnectHandler;
 
 /*
@@ -372,10 +383,10 @@ public:
   bool isExpectedRequestedConnType(RequestedConnectionType erct1, RequestedConnectionType erct2 = RCT_NOT_USED, RequestedConnectionType erct3 = RCT_NOT_USED)
     const;
   bool isWebSocketUpgrade() const {
-    return _method == HTTP_GET && isExpectedRequestedConnType(RCT_WS);
+    return _method == AsyncWebRequestMethod::HTTP_GET && isExpectedRequestedConnType(RCT_WS);
   }
   bool isSSE() const {
-    return _method == HTTP_GET && isExpectedRequestedConnType(RCT_EVENT);
+    return _method == AsyncWebRequestMethod::HTTP_GET && isExpectedRequestedConnType(RCT_EVENT);
   }
   bool isHTTP() const {
     return isExpectedRequestedConnType(RCT_DEFAULT, RCT_HTTP);
@@ -1545,7 +1556,7 @@ public:
   bool removeHandler(AsyncWebHandler *handler);
 
   AsyncCallbackWebHandler &on(AsyncURIMatcher uri, ArRequestHandlerFunction onRequest) {
-    return on(std::move(uri), HTTP_ANY, onRequest);
+    return on(std::move(uri), AsyncWebRequestMethod::HTTP_ANY, onRequest);
   }
   AsyncCallbackWebHandler &on(
     AsyncURIMatcher uri, WebRequestMethodComposite method, ArRequestHandlerFunction onRequest, ArUploadHandlerFunction onUpload = nullptr,
