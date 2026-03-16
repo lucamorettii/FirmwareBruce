@@ -333,20 +333,27 @@ static bool mifareClassicReadDump(uint8_t &sectorsRead) {
                 authenticated = true;
                 break;
             }
+            mifareNfc.inRelease(1);
+            mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
         }
 
-        // Tentativo con Key B se Key A fallisce
-        if (!authenticated) {
-            for (auto &key : keys) {
-                if (mifareNfc.mifareclassic_AuthenticateBlock(
-                        g_dump.uid, g_dump.uidLen, trailer, 1, key.data()
-                    )) {
-                    memcpy(g_dump.keyB[s], key.data(), 6);
-                    g_dump.keyBFound[s] = true;
-                    authenticated = true;
-                    break;
-                }
+        // Tentativo con Key B
+        for (auto &key : keys) {
+            // Re-autentica con Key A prima di provare Key B
+            if (g_dump.keyAFound[s]) {
+                mifareNfc.mifareclassic_AuthenticateBlock(
+                    g_dump.uid, g_dump.uidLen, trailer, 0, g_dump.keyA[s]
+                );
             }
+            if (mifareNfc.mifareclassic_AuthenticateBlock(
+                    g_dump.uid, g_dump.uidLen, trailer, 1, key.data()
+                )) {
+                memcpy(g_dump.keyB[s], key.data(), 6);
+                g_dump.keyBFound[s] = true;
+                break;
+            }
+            mifareNfc.inRelease(1);
+            mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
         }
 
         if (!authenticated) {
