@@ -6,12 +6,18 @@
  *   - Inizializzazione lazy del driver Adafruit_PN532 via I²C
  *   - Helper per tipo/struttura del tag (SAK → settori, blocchi, trailer)
  *   - Caricamento chiavi da SD con supporto CSV uid,chiave
+ *   - Gestione gestori: lista nomi e associazioni UID→gestore su SD
  *   - Lettura completa del dump (MIFARE Classic e Ultralight)
  *   - Scrittura dump su tag fisico
  *   - Serializzazione/deserializzazione del dump su SD
  *
  * Convenzione di log: tutti i messaggi seriali usano il prefisso "[TESSERE]".
- * Percorsi SD: /rfid/chiavi.txt (chiavi), /rfid/dumps/<UID>.bin (dump).
+ *
+ * Percorsi SD:
+ *   - /rfid/chiavi.txt      → chiavi di autenticazione
+ *   - /rfid/gestori.txt     → lista nomi gestori
+ *   - /rfid/gestori_map.txt → associazioni uid,gestore
+ *   - /rfid/dumps/          → dump binari (<UID>.bin)
  */
 
 #include "TessereLogic.h"
@@ -155,11 +161,11 @@ String buildUIDHex(const uint8_t *uid, uint8_t len) {
 std::vector<std::array<uint8_t, 6>> loadKeysForUID(const uint8_t *uid, uint8_t uidLen) {
     std::vector<std::array<uint8_t, 6>> keys;
 
-    // Chiavi di default sempre presenti (prima da provare)
+    // Chiavi di default sempre presenti (prime da provare)
     keys.push_back({0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF});
     keys.push_back({0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
 
-    String uidHex = buildUIDHex(uid, uidLen); // es. "AABBCCDD"
+    String uidHex = buildUIDHex(uid, uidLen);
 
     if (!SD.exists("/rfid/chiavi.txt")) return keys;
     File f = SD.open("/rfid/chiavi.txt", FILE_READ);
@@ -212,6 +218,246 @@ std::vector<std::array<uint8_t, 6>> loadKeysForUID(const uint8_t *uid, uint8_t u
     return keys;
 }
 
+// ─── Gestione gestori ─────────────────────────────────────────────────────────
+//
+// Due file distinti per separare lista nomi e associazioni:
+//   gestori.txt     → un nome per riga  (es. "Sto&Bene")
+//   gestori_map.txt → uid,nome per riga (es. "1E733840,Sto&Bene")
+//
+// Tutte le funzioni che riscrivono un file usano un file temporaneo
+// per evitare corruzione in caso di interruzione durante la scrittura.
+
+/**
+ * @brief Helper interno: copia il contenuto di @p src in @p dst e rimuove @p src.
+ *
+ * Usato da deleteGestore e modifyGestore per sostituire atomicamente
+ * un file con la sua versione aggiornata tramite file temporaneo.
+ */
+static void replaceFile(const String &src, const String &dst) {
+    SD.remove(dst);
+    File fr = SD.open(src, FILE_READ);
+    File fw = SD.open(dst, FILE_WRITE);
+    if (fr && fw) {
+        while (fr.available()) fw.write(fr.read());
+    }
+    if (fr) fr.close();
+    if (fw) fw.close();
+    SD.remove(src);
+}
+
+/**
+ * @brief Carica la lista dei nomi gestore da /rfid/gestori.txt.
+ *
+ * Il file contiene un nome per riga. Righe vuote vengono ignorate.
+ * @return Vettore di stringhe con i nomi dei gestori disponibili.
+ */
+std::vector<String> loadGestori() {
+    std::vector<String> list;
+    if (!SD.exists("/rfid/gestori.txt")) return list;
+
+    File f = SD.open("/rfid/gestori.txt", FILE_READ);
+    if (!f) return list;
+
+    while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (!line.isEmpty()) list.push_back(line);
+    }
+    f.close();
+    return list;
+}
+
+/**
+ * @brief Aggiunge un nuovo nome gestore in /rfid/gestori.txt.
+ *
+ * Non aggiunge duplicati: se il nome esiste già, restituisce false.
+ * Crea la cartella /rfid e il file se non esistono.
+ */
+bool addGestore(const String &nome) {
+    // Controlla duplicati
+    for (auto &g : loadGestori()) {
+        if (g == nome) return false;
+    }
+
+    if (!SD.exists("/rfid")) SD.mkdir("/rfid");
+    File f = SD.open("/rfid/gestori.txt", FILE_APPEND);
+    if (!f) return false;
+    f.println(nome);
+    f.close();
+    Serial.printf("[TESSERE] Gestore added: %s\n", nome.c_str());
+    return true;
+}
+
+/**
+ * @brief Elimina un gestore da gestori.txt e tutte le sue associazioni in gestori_map.txt.
+ *
+ * Riscrive entrambi i file tramite file temporanei per garantire
+ * l'integrità in caso di interruzione.
+ */
+bool deleteGestore(const String &nome) {
+    // Riscrive gestori.txt senza il nome eliminato
+    auto list = loadGestori();
+    bool found = false;
+
+    File fw = SD.open("/rfid/gestori_tmp.txt", FILE_WRITE);
+    if (!fw) return false;
+    for (auto &g : list) {
+        if (g == nome) {
+            found = true;
+            continue;
+        }
+        fw.println(g);
+    }
+    fw.close();
+    replaceFile("/rfid/gestori_tmp.txt", "/rfid/gestori.txt");
+
+    // Rimuove le associazioni UID→gestore per questo nome in gestori_map.txt
+    if (SD.exists("/rfid/gestori_map.txt")) {
+        File fm = SD.open("/rfid/gestori_map.txt", FILE_READ);
+        File fm2 = SD.open("/rfid/gestori_map_tmp.txt", FILE_WRITE);
+        if (fm && fm2) {
+            while (fm.available()) {
+                String line = fm.readStringUntil('\n');
+                line.trim();
+                int comma = line.indexOf(',');
+                if (comma >= 0 && line.substring(comma + 1) == nome) continue; // rimuove
+                if (!line.isEmpty()) fm2.println(line);
+            }
+        }
+        if (fm) fm.close();
+        if (fm2) fm2.close();
+        replaceFile("/rfid/gestori_map_tmp.txt", "/rfid/gestori_map.txt");
+    }
+
+    Serial.printf("[TESSERE] Gestore deleted: %s\n", nome.c_str());
+    return found;
+}
+
+/**
+ * @brief Rinomina un gestore in gestori.txt e aggiorna tutte le voci in gestori_map.txt.
+ *
+ * Aggiorna sia la lista nomi che tutte le associazioni UID che usavano
+ * il vecchio nome, mantenendo la coerenza tra i due file.
+ */
+bool modifyGestore(const String &oldNome, const String &newNome) {
+    // Aggiorna gestori.txt
+    auto list = loadGestori();
+    bool found = false;
+
+    File fw = SD.open("/rfid/gestori_tmp.txt", FILE_WRITE);
+    if (!fw) return false;
+    for (auto &g : list) {
+        if (g == oldNome) {
+            fw.println(newNome);
+            found = true;
+        } else fw.println(g);
+    }
+    fw.close();
+    replaceFile("/rfid/gestori_tmp.txt", "/rfid/gestori.txt");
+
+    // Aggiorna le associazioni in gestori_map.txt
+    if (SD.exists("/rfid/gestori_map.txt")) {
+        File fm = SD.open("/rfid/gestori_map.txt", FILE_READ);
+        File fm2 = SD.open("/rfid/gestori_map_tmp.txt", FILE_WRITE);
+        if (fm && fm2) {
+            while (fm.available()) {
+                String line = fm.readStringUntil('\n');
+                line.trim();
+                if (line.isEmpty()) continue;
+                int comma = line.indexOf(',');
+                // Sostituisce il vecchio nome con il nuovo nelle associazioni
+                if (comma >= 0 && line.substring(comma + 1) == oldNome)
+                    fm2.println(line.substring(0, comma + 1) + newNome);
+                else fm2.println(line);
+            }
+        }
+        if (fm) fm.close();
+        if (fm2) fm2.close();
+        replaceFile("/rfid/gestori_map_tmp.txt", "/rfid/gestori_map.txt");
+    }
+
+    Serial.printf("[TESSERE] Gestore renamed: %s → %s\n", oldNome.c_str(), newNome.c_str());
+    return found;
+}
+
+/**
+ * @brief Associa un UID a un gestore in /rfid/gestori_map.txt.
+ *
+ * Se l'UID era già associato a un altro gestore, sovrascrive l'associazione.
+ * Riscrive l'intero file per garantire unicità dell'UID.
+ */
+bool associateGestore(const String &uidHex, const String &nome) {
+    if (!SD.exists("/rfid")) SD.mkdir("/rfid");
+
+    // Legge le associazioni esistenti aggiornando o aggiungendo quella per questo UID
+    std::vector<String> lines;
+    bool updated = false;
+
+    if (SD.exists("/rfid/gestori_map.txt")) {
+        File f = SD.open("/rfid/gestori_map.txt", FILE_READ);
+        if (f) {
+            while (f.available()) {
+                String line = f.readStringUntil('\n');
+                line.trim();
+                if (line.isEmpty()) continue;
+                int comma = line.indexOf(',');
+                if (comma >= 0 && line.substring(0, comma) == uidHex) {
+                    lines.push_back(uidHex + "," + nome); // sovrascrive
+                    updated = true;
+                } else {
+                    lines.push_back(line);
+                }
+            }
+            f.close();
+        }
+    }
+    if (!updated) lines.push_back(uidHex + "," + nome);
+
+    SD.remove("/rfid/gestori_map.txt");
+    File fw = SD.open("/rfid/gestori_map.txt", FILE_WRITE);
+    if (!fw) return false;
+    for (auto &l : lines) fw.println(l);
+    fw.close();
+
+    Serial.printf("[TESSERE] UID %s associated to %s\n", uidHex.c_str(), nome.c_str());
+    return true;
+}
+
+/**
+ * @brief Cerca il nome del gestore associato all'UID in /rfid/gestori_map.txt.
+ *
+ * Legge il file CSV riga per riga confrontando l'UID (case-insensitive).
+ * Righe malformate o senza separatore ',' vengono ignorate.
+ *
+ * @param uidHex UID del tag in formato esadecimale maiuscolo (es. "1E733840").
+ * @return Nome del gestore se trovato, stringa vuota se non presente.
+ */
+String lookupGestore(const String &uidHex) {
+    if (!SD.exists("/rfid/gestori_map.txt")) return "";
+    File f = SD.open("/rfid/gestori_map.txt", FILE_READ);
+    if (!f) return "";
+
+    while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        int comma = line.indexOf(',');
+        if (comma < 0) continue;
+
+        String uid = line.substring(0, comma);
+        String name = line.substring(comma + 1);
+        uid.trim();
+        name.trim();
+        uid.toUpperCase();
+
+        if (uid == uidHex) {
+            f.close();
+            return name;
+        }
+    }
+    f.close();
+    return "";
+}
+
 // ─── Inizializzazione PN532 ──────────────────────────────────────────────────
 
 /**
@@ -250,7 +496,7 @@ bool mifareInit() {
  * @brief Attende un tag MIFARE ISO14443A sul lettore (timeout 6 secondi).
  *
  * In caso di successo popola g_dump con: uid, uidLen, sak, atqa, tagType
- * e numSectors. Azera inoltre i flag blockRead e keyFound.
+ * e numSectors. Azzera inoltre i flag blockRead e keyFound.
  *
  * @return true se un tag è stato rilevato entro il timeout.
  */
@@ -305,10 +551,11 @@ bool waitForAnyMifareTag(uint8_t *uid, uint8_t *uidLen) {
  *
  * Per ogni settore prova tutte le chiavi caricate dalla SD:
  *   1. Prima come Key A; se autenticata, legge tutti i blocchi del settore.
- *   2. Se Key A fallisce, prova le stesse chiavi come Key B.
+ *   2. Prova sempre anche Key B (indipendentemente da Key A) perché
+ *      l'hardware restituisce Key A come 00×6 nel trailer, ma Key B è leggibile.
  *
- * I blocchi letti con successo vengono marcati con blockRead[]=true.
- * Le chiavi trovate vengono memorizzate in keyA[]/keyB[] per la scrittura.
+ * Dopo la lettura del trailer, ripristina Key A dai dati trovati durante
+ * l'autenticazione (l'hardware la oscura sempre come 00×6).
  *
  * @param sectorsRead Numero di settori letti con successo (output).
  * @return true se almeno un settore è stato letto.
@@ -333,11 +580,12 @@ static bool mifareClassicReadDump(uint8_t &sectorsRead) {
                 authenticated = true;
                 break;
             }
+            // Re-selezione dopo autenticazione fallita (il tag va in stato di errore)
             mifareNfc.inRelease(1);
             mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
         }
 
-        // Tentativo con Key B
+        // Tentativo con Key B (sempre, anche se Key A è già nota)
         for (auto &key : keys) {
             // Re-autentica con Key A prima di provare Key B
             if (g_dump.keyAFound[s]) {
@@ -364,12 +612,16 @@ static bool mifareClassicReadDump(uint8_t &sectorsRead) {
         // Legge tutti i blocchi del settore
         for (uint8_t b = 0; b < count; b++) {
             uint8_t blockNum = first + b;
-            if (mifareNfc.mifareclassic_ReadDataBlock(blockNum, g_dump.data[blockNum])) {
+            if (mifareNfc.mifareclassic_ReadDataBlock(blockNum, g_dump.data[blockNum]))
                 g_dump.blockRead[blockNum] = true;
-            } else {
-                Serial.printf("[TESSERE] Sector %u block %u read failed.\n", s, blockNum);
-            }
+            else Serial.printf("[TESSERE] Sector %u block %u read failed.\n", s, blockNum);
         }
+
+        // Ripristina Key A nel trailer: l'hardware la restituisce sempre come 00×6
+        if (g_dump.keyAFound[s]) memcpy(g_dump.data[trailer], g_dump.keyA[s], 6);
+        // Ripristina Key B nel trailer (byte 10..15)
+        if (g_dump.keyBFound[s]) memcpy(g_dump.data[trailer] + 10, g_dump.keyB[s], 6);
+
         sectorsRead++;
     }
     return sectorsRead > 0;
@@ -407,10 +659,7 @@ static bool mifareULReadDump(uint8_t &pagesRead) {
  * @param sectorsRead Settori (o pagine per UL) letti con successo (output).
  */
 bool mifareReadDump(uint8_t &sectorsRead) {
-    if (g_dump.sak == 0x00) {
-        // MIFARE Ultralight: lettura per pagine senza autenticazione
-        return mifareULReadDump(sectorsRead);
-    }
+    if (g_dump.sak == 0x00) return mifareULReadDump(sectorsRead);
     return mifareClassicReadDump(sectorsRead);
 }
 
@@ -484,7 +733,7 @@ static bool mifareClassicWriteDump(const MifareDump &src, uint8_t &sectorsWritte
  * Scrive le pagine presenti nel dump (4 byte per pagina).
  * Pagine 0..3 (lock/config pages) vengono saltate per sicurezza.
  *
- * @param src        Dump sorgente.
+ * @param src          Dump sorgente.
  * @param pagesWritten Pagine scritte con successo (output).
  */
 static bool mifareULWriteDump(const MifareDump &src, uint8_t &pagesWritten) {

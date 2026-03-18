@@ -4,7 +4,7 @@
  *
  * Questo file gestisce:
  *   - La costruzione del menu di primo livello tramite loopOptions di Bruce,
- *     con le quattro azioni disponibili (Info, Read, Write, Auto Write).
+ *     con le cinque azioni disponibili (Info, Read, Write, Auto Write, Gestori).
  *   - Il disegno dell'icona vettoriale della carta con chip EMV nel launcher.
  *
  * L'inizializzazione del PN532 è lazy e avviene dentro mifareInit(),
@@ -16,11 +16,11 @@
 #include "core/display.h"
 
 /**
- * @brief Mostra il menu principale Tessere con le quattro operazioni disponibili.
+ * @brief Mostra il menu principale Tessere con le cinque operazioni disponibili.
  *
  * Le azioni sono collegate tramite lambda alle funzioni dichiarate in
  * TessereMenuLogic.h. Il PN532 viene inizializzato internamente dalla
- * prima azione invocata, non qui.
+ * prima azione NFC invocata, non qui.
  */
 void Tessere::optionsMenu() {
     std::vector<Option> options = {
@@ -28,6 +28,7 @@ void Tessere::optionsMenu() {
         {"Read",       []() { ReadTessera(); },      false},
         {"Write",      []() { WriteTessera(); },     false},
         {"Auto Write", []() { AutoWriteTessera(); }, false},
+        {"Gestori",    []() { GestoriMenu(); },      false},
     };
     loopOptions(options, MENU_TYPE_SUBMENU, "Tessere");
 }

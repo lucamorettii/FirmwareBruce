@@ -6,7 +6,7 @@
  * al firmware la gestione dei tag NFC MIFARE (Classic 1K/4K/Mini, Ultralight).
  * Espone:
  *   - Un'icona vettoriale scalabile che rappresenta una carta con chip EMV.
- *   - Il menu principale con Info, Read, Write e Auto Write.
+ *   - Il menu principale con Info, Read, Write, Auto Write e Gestori.
  *   - Il supporto al sistema di theming di Bruce.
  */
 
@@ -39,10 +39,11 @@ public:
      * @brief Mostra il menu principale con le operazioni disponibili sul tag.
      *
      * Voci del menu:
-     *   - Info       → identifica il tag (UID, SAK, ATQA, tipo)
+     *   - Info       → identifica il tag (UID, SAK, ATQA, tipo, gestore)
      *   - Read       → legge il dump e lo salva su SD
      *   - Write      → scrive un dump scelto dalla SD
      *   - Auto Write → scrive automaticamente il dump in base all'UID
+     *   - Gestori    → gestisce la lista dei gestori (aggiungi/modifica/elimina)
      */
     void optionsMenu() override;
 

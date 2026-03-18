@@ -10,8 +10,10 @@
  *   - Le funzioni core usate da TessereMenuLogic e da Tessere.cpp
  *
  * Percorsi SD usati dal modulo:
- *   - /rfid/chiavi.txt  → chiavi di autenticazione (CSV uid,chiave)
- *   - /rfid/dumps/      → dump binari dei tag (<UIDHEX>.bin)
+ *   - /rfid/chiavi.txt       → chiavi di autenticazione (CSV uid,chiave)
+ *   - /rfid/gestori.txt      → lista nomi gestori (uno per riga)
+ *   - /rfid/gestori_map.txt  → associazioni UID→gestore (CSV uid,nome)
+ *   - /rfid/dumps/           → dump binari dei tag (<UIDHEX>.bin)
  */
 
 #pragma once
@@ -133,6 +135,81 @@ uint8_t blocksInSector(uint8_t sector);
  */
 std::vector<std::array<uint8_t, 6>> loadKeysForUID(const uint8_t *uid, uint8_t uidLen);
 
+// ─── Gestione gestori ─────────────────────────────────────────────────────────
+//
+// I gestori sono memorizzati su due file separati:
+//   - gestori.txt     → lista dei nomi (uno per riga), modificata dal menu Gestori
+//   - gestori_map.txt → associazioni uid,nome, aggiornate dalla Read e dal menu Gestori
+
+/**
+ * @brief Carica la lista dei nomi gestore da /rfid/gestori.txt.
+ *
+ * Il file contiene un nome per riga (es. "Sto&Bene").
+ * Righe vuote vengono ignorate.
+ *
+ * @return Vettore di stringhe con i nomi dei gestori disponibili.
+ */
+std::vector<String> loadGestori();
+
+/**
+ * @brief Aggiunge un nuovo nome gestore in /rfid/gestori.txt.
+ *
+ * Non aggiunge duplicati: se il nome esiste già, non fa nulla.
+ * Crea il file e la cartella /rfid se non esistono.
+ *
+ * @param nome Nome del gestore da aggiungere.
+ * @return true se il gestore è stato aggiunto, false se già esistente o errore SD.
+ */
+bool addGestore(const String &nome);
+
+/**
+ * @brief Elimina un gestore da /rfid/gestori.txt e tutte le sue associazioni.
+ *
+ * Riscrive gestori.txt escludendo il nome indicato.
+ * Rimuove anche tutte le voci corrispondenti in gestori_map.txt.
+ *
+ * @param nome Nome del gestore da eliminare.
+ * @return true se il gestore è stato trovato ed eliminato.
+ */
+bool deleteGestore(const String &nome);
+
+/**
+ * @brief Rinomina un gestore in gestori.txt e aggiorna gestori_map.txt.
+ *
+ * Aggiorna sia la lista nomi che tutte le associazioni UID che
+ * usavano il vecchio nome, mantenendo la coerenza tra i due file.
+ *
+ * @param oldNome Nome attuale del gestore.
+ * @param newNome Nuovo nome da assegnare.
+ * @return true se il gestore è stato trovato e rinominato.
+ */
+bool modifyGestore(const String &oldNome, const String &newNome);
+
+/**
+ * @brief Associa un UID a un gestore in /rfid/gestori_map.txt.
+ *
+ * Se l'UID era già associato a un altro gestore, sovrascrive l'associazione.
+ * Crea il file se non esiste.
+ * Formato CSV: uid,nome (es. 1E733840,Sto&Bene).
+ *
+ * @param uidHex UID del tag in formato esadecimale maiuscolo.
+ * @param nome   Nome del gestore da associare.
+ * @return true se l'associazione è stata salvata correttamente.
+ */
+bool associateGestore(const String &uidHex, const String &nome);
+
+/**
+ * @brief Cerca il nome del gestore associato all'UID in /rfid/gestori_map.txt.
+ *
+ * Legge il file CSV riga per riga confrontando l'UID (case-insensitive).
+ * Righe malformate o senza separatore ',' vengono ignorate.
+ *
+ * @param uidHex UID del tag in formato esadecimale maiuscolo (es. "1E733840").
+ * @return Nome del gestore se trovato, stringa vuota se il file non esiste
+ *         o se l'UID non è presente.
+ */
+String lookupGestore(const String &uidHex);
+
 // ─── Operazioni core ─────────────────────────────────────────────────────────
 
 /**
@@ -191,10 +268,10 @@ String buildUIDHex(const uint8_t *uid, uint8_t len);
 
 // ─── Azioni menu (dichiarate qui, implementate in TessereMenuLogic.cpp) ───────
 
-/** @brief Mostra UID, SAK, ATQA e tipo del tag a schermo. */
+/** @brief Mostra UID, SAK, ATQA, tipo e gestore del tag a schermo. */
 void InfoTessera();
 
-/** @brief Legge il dump del tag e lo salva su SD. */
+/** @brief Legge il dump del tag, lo salva su SD e chiede di associare un gestore. */
 void ReadTessera();
 
 /** @brief Scrive sul tag un dump selezionato dalla SD. */
@@ -202,3 +279,6 @@ void WriteTessera();
 
 /** @brief Scrive automaticamente il dump corretto in base all'UID del tag. */
 void AutoWriteTessera();
+
+/** @brief Menu di gestione gestori: aggiungi, modifica, elimina. */
+void GestoriMenu();
