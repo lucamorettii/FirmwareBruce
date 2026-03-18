@@ -698,14 +698,12 @@ void mikai_reset_key(struct mykey_t *key) {
                 encode_decode_block(block);
                 break;
 
-            // Blocco 0x19: vendor default con ricalcolo chiave dopo la scrittura
             case 0x19:
                 block[1] = 0x00;
                 block[2] = 0x01;
                 block[3] = 0x23;
                 calculateBlockChecksum(block, i);
                 encode_decode_block(block);
-                calculateEncryptionKey(key); // ricalcola la SK dopo il reset vendor
                 break;
 
             // Blocchi credito (0x00) cifrati con la chiave di sessione
@@ -767,6 +765,8 @@ void mikai_reset_key(struct mykey_t *key) {
             srix_flag_add(&key->srix4k->srixFlag, i);
         }
     }
+
+    calculateEncryptionKey(key);
     Serial.println("[MIKAI] Key reset done.");
 }
 
