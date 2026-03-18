@@ -698,6 +698,7 @@ void mikai_reset_key(struct mykey_t *key) {
                 encode_decode_block(block);
                 break;
 
+            // Blocco 0x19: vendor default
             case 0x19:
                 block[1] = 0x00;
                 block[2] = 0x01;
@@ -766,7 +767,7 @@ void mikai_reset_key(struct mykey_t *key) {
         }
     }
 
-    calculateEncryptionKey(key);
+    // calculateEncryptionKey(key);
     Serial.println("[MIKAI] Key reset done.");
 }
 
