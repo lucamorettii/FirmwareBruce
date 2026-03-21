@@ -18,6 +18,7 @@ tessere di accesso e pagamento prepagato.
 8. [Come aggiungere un nuovo tipo di tessera](#8-come-aggiungere-un-nuovo-tipo-di-tessera)
 9. [Flusso di una operazione NFC tipica](#9-flusso-di-una-operazione-nfc-tipica)
 10. [Note e avvertenze](#10-note-e-avvertenze)
+11. [Miglioramenti](#11-miglioramenti)
 
 ---
 
@@ -486,3 +487,11 @@ le chiavi di default (FF×6 o 00×6), lasciando intatte le chiavi custom.
 `mifareWriteBlock0()` ritorna `false` senza errori bloccanti su tag normali.
 L'operazione di scrittura degli altri settori procede comunque.
 Usa il parametro `block0Written` per sapere se la clonazione è stata completa.
+
+## 11. Miglioramenti
+
+```
+1. Microel (generale)
+2. Verificare la scrittura microel e classic
+3. Implementare la generazioni di chiavi tramite stringa
+```
