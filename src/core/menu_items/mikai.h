@@ -12,7 +12,7 @@
 #ifndef __MIKAI_H__
 #define __MIKAI_H__
 
-#include "MikaiLogic.h"
+#include "itsFree/mikai/MikaiLogic.h"
 #include "pn532_srix.h"
 #include <MenuItemInterface.h>
 #include <vector>
