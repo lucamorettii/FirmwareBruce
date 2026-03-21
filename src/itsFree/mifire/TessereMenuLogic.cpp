@@ -3,13 +3,13 @@
  * @brief Implementazione delle azioni di menu Tessere (UI + bridge verso TessereLogic).
  *
  * Questo file contiene tutta la logica di presentazione: titoli, feedback
- * di avanzamento, selezione file da SD e gestione degli errori.
+ * di avanzamento, selezione file da SD e gestione degli errori a schermo.
  * Nessuna logica NFC risiede qui: ogni operazione sul tag è delegata
- * all'API dichiarata in TessereLogic.h.
+ * all'API dichiarata in TessereLogic.h e TessereMicroelLogic.h.
  *
  * Helper UI interni:
  *   - showMessage() → mostra titolo + corpo e attende un tasto
- *   - showInfo()    → mostra titolo + corpo senza attendere (messaggi di stato)
+ *   - showInfo()    → mostra titolo + corpo senza attendere (stati intermedi)
  *
  * Azioni implementate:
  *   - InfoTessera()      → mostra UID, SAK, ATQA, tipo e gestore del tag
@@ -17,12 +17,18 @@
  *   - WriteTessera()     → scrive dump selezionato dalla SD
  *   - AutoWriteTessera() → scrive automaticamente il dump per l'UID rilevato
  *   - GestoriMenu()      → gestisce la lista gestori (aggiungi/modifica/elimina)
+ *   - MicroelTessera()   → sottomenu Microel (Info KDF, Read con KDF, Write + blocco 0)
+ *
+ * Modifiche rispetto alla versione originale:
+ *   - Aggiunto #include "TessereMicroelLogic.h" per le funzioni Microel.
+ *   - Aggiunta implementazione completa di MicroelTessera().
  */
 
 #include "TessereMenuLogic.h"
 #include "TessereLogic.h"
 #include "core/display.h"
 #include "core/mykeyboard.h"
+#include "microel/TessereMicroelLogic.h" // microelInfoCard, microelReadCard, microelWriteCard, ecc.
 #include <SD.h>
 
 // ─── Helper UI (statici interni) ─────────────────────────────────────────────
@@ -31,8 +37,12 @@
  * @brief Mostra un pannello con titolo e corpo testuale, poi attende un tasto.
  *
  * Spezza il corpo sulle righe (separatore '\n') e rispetta i margini
- * dello schermo di Bruce tramite padprintln. Timeout minimo di 300 ms.
- * Da usare per risultati finali, errori e conferme.
+ * dello schermo di Bruce tramite padprintln.
+ * Attende minimo 300 ms per evitare letture accidentali di tasti già premuti.
+ * Da usare per risultati finali, errori, riepiloghi e conferme.
+ *
+ * @param title Titolo del pannello (barra superiore Bruce).
+ * @param body  Testo del corpo, righe separate da '\n'.
  */
 static void showMessage(const String &title, const String &body) {
     drawMainBorderWithTitle(title);
@@ -40,13 +50,16 @@ static void showMessage(const String &title, const String &body) {
 
     String tmp = body;
     int start = 0, idx;
+    // Scorre il testo cercando '\n' come separatore di riga
     while ((idx = tmp.indexOf('\n', start)) != -1) {
-        padprintln(tmp.substring(start, idx));
+        padprintln(tmp.substring(start, idx)); // stampa la riga senza '\n'
         start = idx + 1;
     }
-    padprintln(tmp.substring(start));
+    padprintln(tmp.substring(start)); // stampa l'ultima riga (priva di '\n')
 
-    delay(300);
+    delay(300); // pausa minima per evitare lettura immediata
+
+    // Blocca finché l'utente non preme un tasto
     while (!AnyKeyPress) {
         InputHandler();
         delay(50);
@@ -56,9 +69,12 @@ static void showMessage(const String &title, const String &body) {
 /**
  * @brief Mostra un pannello con titolo e corpo testuale senza attendere input.
  *
- * A differenza di showMessage(), non aspetta la pressione di un tasto.
- * Da usare per messaggi di stato intermedi durante operazioni NFC
- * (es. "Place tag on reader...", "Reading sectors...", "Writing...").
+ * Usata per messaggi di stato intermedi durante operazioni NFC lunghe:
+ * es. "Place tag on reader...", "Reading sectors...", "Writing...".
+ * Non blocca il flusso: il programma prosegue immediatamente dopo il disegno.
+ *
+ * @param title Titolo del pannello.
+ * @param body  Testo del corpo.
  */
 static void showInfo(const String &title, const String &body) {
     drawMainBorderWithTitle(title);
@@ -71,35 +87,39 @@ static void showInfo(const String &title, const String &body) {
         start = idx + 1;
     }
     padprintln(tmp.substring(start));
+    // Nessuna attesa: il chiamante prosegue immediatamente
 }
 
-// ─── Azioni menu ─────────────────────────────────────────────────────────────
+// ─── Azioni menu standard ─────────────────────────────────────────────────────
 
 /**
  * @brief Identifica il tag sul lettore e mostra UID, SAK, ATQA, tipo e gestore.
  *
- * Non legge i blocchi dati: si limita al rilevamento (waitForMifareTag),
+ * Non legge i blocchi dati: si limita al rilevamento tramite waitForMifareTag(),
  * quindi è veloce e non richiede chiavi di autenticazione.
- * Mostra anche se esiste un dump salvato per questo tag.
+ * Controlla anche se esiste un dump salvato su SD per questo UID.
  */
 void InfoTessera() {
-    if (!mifareInit()) return;
-    if (!waitForMifareTag()) return;
+    if (!mifareInit()) return;       // inizializza PN532 se necessario
+    if (!waitForMifareTag()) return; // attende il tag (timeout 6 s)
 
+    // Costruisce la stringa UID per la ricerca del dump e del gestore
     String uidStr = buildUIDHex(g_dump.uid, g_dump.uidLen);
 
+    // Formatta SAK e ATQA come stringhe esadecimali
     char sakStr[5], atqaStr[5];
     snprintf(sakStr, sizeof(sakStr), "%02X", g_dump.sak);
     snprintf(atqaStr, sizeof(atqaStr), "%04X", g_dump.atqa);
 
-    // Controlla se esiste un dump salvato per questo tag
+    // Controlla se esiste già un dump salvato per questo UID
     String dumpPath = "/rfid/dumps/" + uidStr + ".bin";
     String dumpStatus = SD.exists(dumpPath) ? "Saved: YES" : "Saved: NO";
 
-    // Cerca il gestore associato all'UID
+    // Cerca il gestore associato all'UID nella mappa su SD
     String gestore = lookupGestore(uidStr);
     String gestoreStr = gestore.isEmpty() ? "unknown" : gestore;
 
+    // Mostra tutte le informazioni in un pannello e attende un tasto
     showMessage(
         "Info",
         "UID:  " + uidStr + "\n" + "SAK:  0x" + String(sakStr) + "\n" + "ATQA: 0x" + String(atqaStr) + "\n" +
@@ -111,14 +131,12 @@ void InfoTessera() {
  * @brief Legge il dump completo del tag, lo salva su SD e chiede di associare un gestore.
  *
  * Flusso:
- *   1. Inizializza il PN532.
- *   2. Rileva il tag e ne legge l'identità.
- *   3. Mostra avanzamento con showInfo() (nessuna attesa tasto).
- *   4. Chiama mifareReadDump() che prova le chiavi da /rfid/chiavi.txt.
- *   5. Salva il dump in /rfid/dumps/<UIDHEX>.bin.
- *   6. Mostra il riepilogo con showMessage().
- *   7. Chiede yes/no se associare un gestore dalla lista in /rfid/gestori.txt.
- *      Se il tag aveva già un gestore associato, lo mostra come suggerimento.
+ *   1. Inizializza il PN532 e rileva il tag.
+ *   2. Mostra avanzamento a schermo (senza bloccare su tasto).
+ *   3. Chiama mifareReadDump() che prova le chiavi da /rfid/chiavi.txt.
+ *   4. Salva il dump in /rfid/dumps/<UIDHEX>.bin.
+ *   5. Mostra il riepilogo e chiede se associare un gestore.
+ *      Se era già associato, mostra il gestore corrente e chiede se cambiarlo.
  */
 void ReadTessera() {
     if (!mifareInit()) return;
@@ -126,7 +144,7 @@ void ReadTessera() {
 
     String uidHex = buildUIDHex(g_dump.uid, g_dump.uidLen);
 
-    // Stato intermedio: mostra avanzamento senza aspettare input
+    // Mostra stato intermedio: lettura in corso (non blocca su tasto)
     showInfo(
         "Read",
         "UID: " + uidHex + "\n" + "Type: " + g_dump.tagType + "\n" +
@@ -134,34 +152,36 @@ void ReadTessera() {
             "Keep tag on reader!"
     );
 
+    // Legge tutti i settori leggibili con le chiavi da SD
     uint8_t sectorsRead = 0;
     if (!mifareReadDump(sectorsRead)) {
         showMessage("Read", "No sectors readable.\nCheck /rfid/chiavi.txt");
         return;
     }
 
+    // Salva il dump su SD
     if (!saveDumpToSD(g_dump, uidHex)) {
         showMessage("Read", "Read ok but SD save\nfailed!");
         return;
     }
 
-    String resultPath = "/rfid/dumps/" + uidHex + ".bin";
+    // Mostra il riepilogo della lettura
     showMessage(
         "Read",
-        "Done!\n"
-        "Sectors: " +
-            String(sectorsRead) + "/" + String(g_dump.numSectors) + "\n" + "Saved:\n" + resultPath
+        "Done!\nSectors: " + String(sectorsRead) + "/" + String(g_dump.numSectors) +
+            "\nSaved:\n/rfid/dumps/" + uidHex + ".bin"
     );
 
-    // Chiede se associare un gestore alla tessera appena letta
-    // Il titolo del menu mostra il gestore attuale se già presente
+    // Chiede se associare/cambiare il gestore per questa tessera
     String gestoreAttuale = lookupGestore(uidHex);
-    String prompt =
-        gestoreAttuale.isEmpty() ? "Associate gestore?" : "Gestore: " + gestoreAttuale + "\nChange?";
+    String prompt = gestoreAttuale.isEmpty()
+                        ? "Associate gestore?" // nessun gestore: chiede di aggiungerne uno
+                        : "Gestore: " + gestoreAttuale + "\nChange?"; // già presente: chiede se cambiarlo
 
     std::vector<Option> gestoreOpts = {
         {"Yes",
          [uidHex]() {
+             // Carica la lista dei gestori disponibili da SD
              auto list = loadGestori();
              if (list.empty()) {
                  showMessage(
@@ -173,14 +193,15 @@ void ReadTessera() {
                  return;
              }
 
-             // Mostra la lista dei gestori disponibili
+             // Mostra la lista e lascia scegliere il gestore da associare
              std::vector<Option> gOpts;
              for (auto &g : list) {
                  gOpts.push_back(
                      {g.c_str(),
                       [uidHex, g]() {
+                          // Salva l'associazione UID→gestore in gestori_map.txt
                           if (associateGestore(uidHex, g))
-                              showMessage("Read", "Associated:\n" + uidHex + "\nVending operators: " + g);
+                              showMessage("Read", "Associated:\n" + uidHex + "\nGestore: " + g);
                           else showMessage("Read", "Error saving\nassociation.");
                       },
                       false}
@@ -188,51 +209,54 @@ void ReadTessera() {
              }
              loopOptions(gOpts, MENU_TYPE_SUBMENU, "Select gestore");
          },              false},
-        {"No",  []() {}, false},
+        {"No",  []() {}, false}, // utente rinuncia: non fa nulla
     };
     loopOptions(gestoreOpts, MENU_TYPE_SUBMENU, prompt.c_str());
 }
 
 /**
- * @brief Scrive sul tag fisico un dump scelto dalla lista di file su SD.
+ * @brief Scrive sul tag fisico un dump scelto dall'utente dalla lista su SD.
  *
  * Flusso:
  *   1. Inizializza il PN532.
- *   2. Elenca i file .bin in /rfid/dumps/.
+ *   2. Elenca i file .bin presenti in /rfid/dumps/.
  *   3. L'utente seleziona il file desiderato.
- *   4. Mostra l'UID contenuto nel dump e chiede conferma.
- *   5. In caso di conferma, attende il tag con showInfo() e scrive il dump.
- *   6. Mostra il riepilogo con showMessage().
+ *   4. Mostra l'UID del dump e chiede conferma.
+ *   5. Attende il tag target (waitForAnyMifareTag: non sovrascrive g_dump).
+ *   6. Se l'UID del tag fisico ≠ UID del dump, avvisa ma continua.
+ *   7. Scrive il dump sul tag e mostra il riepilogo.
  *
- * @note La scrittura viene effettuata dopo la conferma per evitare
- *       scritture accidentali. MifareDump è dichiarata static per
- *       evitare overflow dello stack dell'ESP32 (~5KB).
+ * @note loadedDump è dichiarata static per evitare ~5 KB di overflow sullo stack ESP32.
  */
 void WriteTessera() {
     if (!mifareInit()) return;
 
+    // Verifica che la cartella dei dump esista
     if (!SD.exists("/rfid/dumps")) {
         showMessage("Write", "No /rfid/dumps folder\non SD.");
         return;
     }
 
-    // Elenca i file .bin disponibili
+    // Elenca tutti i file .bin nella cartella dumps
     File dir = SD.open("/rfid/dumps");
     std::vector<Option> fileOpts;
 
     while (true) {
         File entry = dir.openNextFile();
-        if (!entry) break;
+        if (!entry) break; // fine della directory
+
         String name = String(entry.name());
         entry.close();
-        if (!name.endsWith(".bin")) continue;
 
+        if (!name.endsWith(".bin")) continue; // salta i file non .bin
+
+        // Aggiunge una voce per ogni file .bin trovato
         fileOpts.push_back(
             {name.c_str(),
              [name]() {
                  String path = "/rfid/dumps/" + name;
 
-                 // static: evita la copia da ~5KB sullo stack dell'ESP32
+                 // static: evita ~5 KB di overhead sullo stack dell'ESP32
                  static MifareDump loadedDump;
                  if (!loadDumpFromSD(loadedDump, path)) {
                      showMessage("Write", "Cannot load dump:\n" + path);
@@ -241,20 +265,19 @@ void WriteTessera() {
 
                  String dumpUID = buildUIDHex(loadedDump.uid, loadedDump.uidLen);
 
+                 // Chiede conferma prima di scrivere (operazione irreversibile sul tag)
                  std::vector<Option> confirm = {
                      {"Yes, write",
                       []() {
-                          // Stato intermedio: attende tag senza bloccare su tasto
+                          // Attende il tag target senza sovrascrivere g_dump (che contiene il dump sorgente)
                           showInfo("Write", "Place target tag\non reader...");
-
                           uint8_t uid[7], uidLen;
                           if (!waitForAnyMifareTag(uid, &uidLen)) {
                               showMessage("Write", "No tag found.");
                               return;
                           }
 
-                          // Avvisa se l'UID del tag differisce dal dump
-                          // (utile per scrittura su tag blank o clone)
+                          // Avvisa se l'UID del tag fisico ≠ UID del dump (scrittura su tag diverso)
                           String targetUID = buildUIDHex(uid, uidLen);
                           String srcUID = buildUIDHex(loadedDump.uid, loadedDump.uidLen);
                           if (targetUID != srcUID) {
@@ -268,7 +291,7 @@ void WriteTessera() {
                               );
                           }
 
-                          // Stato intermedio: scrittura in corso
+                          // Scrittura in corso: mostra stato senza attendere tasto
                           showInfo("Write", "Writing...\nKeep tag on reader!");
 
                           uint8_t sectorsWritten = 0;
@@ -277,13 +300,14 @@ void WriteTessera() {
                               return;
                           }
 
+                          // Riepilogo scrittura completata
                           showMessage(
                               "Write",
                               "Done!\nSectors: " + String(sectorsWritten) + "/" +
                                   String(loadedDump.numSectors)
                           );
                       },                     false},
-                     {"Cancel",     []() {}, false},
+                     {"Cancel",     []() {}, false}, // annulla senza scrivere
                  };
                  loopOptions(confirm, MENU_TYPE_SUBMENU);
              },
@@ -292,6 +316,7 @@ void WriteTessera() {
     }
     dir.close();
 
+    // Se non ci sono file .bin, avvisa l'utente
     if (fileOpts.empty()) {
         showMessage("Write", "No .bin files in\n/rfid/dumps/");
         return;
@@ -303,14 +328,13 @@ void WriteTessera() {
 /**
  * @brief Legge l'UID del tag e scrive automaticamente il dump corrispondente.
  *
- * Cerca il file /rfid/dumps/<UIDHEX>.bin sulla SD: se trovato, lo carica
- * e lo scrive senza interazione aggiuntiva. Se non trovato, mostra l'UID
- * rilevato e suggerisce di usare "Read" per creare il dump prima.
+ * Cerca /rfid/dumps/<UIDHEX>.bin: se esiste, lo carica e lo scrive senza
+ * ulteriori interazioni. Se non esiste, suggerisce di usare "Read" prima.
  *
- * Caso d'uso tipico: badge/tessere di cui si possiede già il dump,
- * da ripristinare rapidamente avvicinando il tag al lettore.
+ * Caso d'uso: tessere di cui si possiede già il dump, da ripristinare
+ * rapidamente avvicinando il tag al lettore senza navigare menu.
  *
- * @note MifareDump è dichiarata static per evitare overflow dello stack (~5KB).
+ * @note loadedDump è static per evitare ~5 KB di overhead sullo stack ESP32.
  */
 void AutoWriteTessera() {
     if (!mifareInit()) return;
@@ -319,8 +343,9 @@ void AutoWriteTessera() {
     String uidHex = buildUIDHex(g_dump.uid, g_dump.uidLen);
     String path = "/rfid/dumps/" + uidHex + ".bin";
 
-    Serial.printf("[TESSERE] AutoWrite: looking for %s\n", path.c_str());
+    Serial.printf("[TESSERE] AutoWrite: cerco %s\n", path.c_str());
 
+    // Verifica che il dump esista per questo UID
     if (!SD.exists(path)) {
         showMessage(
             "Auto Write", "No dump found for:\n" + uidHex + "\nUse 'Read' first to\ncreate the dump."
@@ -328,14 +353,14 @@ void AutoWriteTessera() {
         return;
     }
 
-    // static: evita la copia da ~5KB sullo stack dell'ESP32
-    static MifareDump loadedDump;
+    // Carica il dump dalla SD
+    static MifareDump loadedDump; // static per evitare overflow stack
     if (!loadDumpFromSD(loadedDump, path)) {
         showMessage("Auto Write", "Cannot load dump.");
         return;
     }
 
-    // Stato intermedio: scrittura in corso, nessuna attesa tasto
+    // Mostra stato di scrittura senza attendere tasto
     showInfo(
         "Auto Write",
         "UID: " + uidHex +
@@ -345,12 +370,14 @@ void AutoWriteTessera() {
             "Keep tag on reader!"
     );
 
+    // Scrive il dump sul tag
     uint8_t sectorsWritten = 0;
     if (!mifareWriteDump(loadedDump, sectorsWritten)) {
         showMessage("Auto Write", "Write failed!\nNo sectors written.");
         return;
     }
 
+    // Riepilogo scrittura completata
     showMessage(
         "Auto Write",
         "Done!\n"
@@ -362,26 +389,28 @@ void AutoWriteTessera() {
 /**
  * @brief Menu di gestione dei gestori: Aggiungi, Modifica, Elimina.
  *
- * Non richiede NFC: opera solo su file SD (/rfid/gestori.txt e
- * /rfid/gestori_map.txt). Le modifiche ai nomi vengono propagate
- * automaticamente a tutte le associazioni UID esistenti.
+ * Non richiede NFC: opera esclusivamente su file SD.
+ * Le modifiche ai nomi vengono propagate automaticamente in gestori_map.txt.
  */
-void GestoriMenu() {
+void GestoriMenuTessera() {
     std::vector<Option> opts = {
 
-        // ── Aggiungi ──────────────────────────────────────────────────────
+        // ── Aggiungi gestore ───────────────────────────────────────────────────
         {"Add",
          []() {
+             // Apre la tastiera di Bruce per inserire il nome del nuovo gestore
              String nome = keyboard("", 20, "Nome gestore:");
              if (nome.isEmpty()) {
                  showMessage("Gestori", "Cancelled.");
                  return;
              }
+
+             // Aggiunge il gestore a gestori.txt (controlla duplicati internamente)
              if (addGestore(nome)) showMessage("Gestori", "Added:\n" + nome);
              else showMessage("Gestori", "Already exists:\n" + nome);
          }, false},
 
-        // ── Modifica ──────────────────────────────────────────────────────
+        // ── Modifica gestore ───────────────────────────────────────────────────
         {"Edit",
          []() {
              auto list = loadGestori();
@@ -390,20 +419,21 @@ void GestoriMenu() {
                  return;
              }
 
-             // Mostra la lista e lascia selezionare quello da rinominare
+             // Mostra la lista e lascia scegliere quale rinominare
              std::vector<Option> selectOpts;
              for (auto &g : list) {
                  selectOpts.push_back(
                      {g.c_str(),
                       [g]() {
-                          // Pre-compila il campo con il nome attuale per comodità
+                          // Pre-compila il campo con il nome attuale per comodità di editing
                           String newNome = keyboard(g, 20, "New name:");
                           if (newNome.isEmpty() || newNome == g) {
                               showMessage("Gestori", "Cancelled.");
                               return;
                           }
+                          // Rinomina in gestori.txt e aggiorna tutte le associazioni
                           if (modifyGestore(g, newNome))
-                              showMessage("Gestori", "Renamed:\nOld:" + g + "\nNew:" + newNome);
+                              showMessage("Gestori", "Renamed:\nOld: " + g + "\nNew: " + newNome);
                           else showMessage("Gestori", "Error renaming.");
                       },
                       false}
@@ -412,7 +442,7 @@ void GestoriMenu() {
              loopOptions(selectOpts, MENU_TYPE_SUBMENU, "Select gestore");
          }, false},
 
-        // ── Elimina ───────────────────────────────────────────────────────
+        // ── Elimina gestore ───────────────────────────────────────────────────
         {"Delete",
          []() {
              auto list = loadGestori();
@@ -421,20 +451,21 @@ void GestoriMenu() {
                  return;
              }
 
-             // Mostra la lista e lascia selezionare quello da eliminare
+             // Mostra la lista e lascia scegliere quale eliminare
              std::vector<Option> selectOpts;
              for (auto &g : list) {
                  selectOpts.push_back(
                      {g.c_str(),
                       [g]() {
-                          // Chiede conferma prima di eliminare
+                          // Chiede conferma prima di eliminare (operazione irreversibile)
                           std::vector<Option> confirm = {
                               {"Yes, delete",
          [g]() {
+                                   // Elimina da gestori.txt e rimuove tutte le associazioni
                                    if (deleteGestore(g)) showMessage("Gestori", "Deleted:\n" + g);
                                    else showMessage("Gestori", "Error deleting.");
                                }, false},
-                              {"Cancel", []() {}, false},
+                              {"Cancel", []() {}, false}, // annulla senza eliminare
                           };
                           loopOptions(confirm, MENU_TYPE_SUBMENU, ("Delete " + g + "?").c_str());
                       },
@@ -445,4 +476,255 @@ void GestoriMenu() {
          },           false                },
     };
     loopOptions(opts, MENU_TYPE_SUBMENU, "Gestori");
+}
+
+// ─── Sottomenu Microel ────────────────────────────────────────────────────────
+
+/**
+ * @brief Sottomenu dedicato alle tessere Microel.
+ *
+ * Le tessere Microel usano un KDF: non servono chiavi su /rfid/chiavi.txt
+ * perché Key A e Key B vengono derivate matematicamente dall'UID del tag.
+ *
+ * Voci del sottomenu:
+ *
+ *   Info  → Mostra su display: UID, Key A e Key B generate dal KDF,
+ *             credito corrente, credito precedente, gestore associato.
+ *             Operazione di sola lettura, non modifica nulla.
+ *
+ *   Read  → Legge tutti i settori usando le chiavi KDF, salva il dump su SD
+ *             in /rfid/dumps/<UIDHEX>.bin, chiede associazione gestore.
+ *             Identico a ReadTessera() ma usa microelReadCard() invece
+ *             di mifareReadDump() direttamente.
+ *
+ *   Write → Scrive il dump scelto dalla SD sul tag fisico.
+ *             A differenza di WriteTessera(), chiama microelWriteCard()
+ *             che scrive ANCHE il blocco 0 (UID/produttore) tramite
+ *             mifareWriteBlock0(). Funziona completamente solo su tag
+ *             magic (CUID, GEN2, ecc.); su tag originali il blocco 0
+ *             viene ignorato ma il resto della scrittura procede.
+ */
+void MicroelTessera() {
+    if (!mifareInit()) return; // inizializza PN532 se necessario
+
+    std::vector<Option> opts = {
+
+        // ── Info Microel ───────────────────────────────────────────────────────
+        // Delega completamente a microelInfoCard() che gestisce tutto internamente:
+        // attesa tag, KDF, lettura credito, lookup gestore, visualizzazione.
+        {"Info",
+         []() {
+             microelInfoCard(); // mostra UID, Key A/B, credito, gestore su display
+         }, false},
+
+        // ── Read Microel ───────────────────────────────────────────────────────
+        // Come ReadTessera() ma usa le chiavi KDF invece di /rfid/chiavi.txt.
+        // Salva il dump su SD e chiede di associare un gestore al termine.
+        {"Read",
+         []() {
+             // Mostra stato di attesa mentre si aspetta il tag
+             showInfo(
+                 "Microel Read",
+                 "Avvicina la tessera\nMicroel al lettore...\n"
+                 "Keep tag on reader!"
+             );
+
+             // Legge la tessera con chiavi KDF (waitForMifareTag + injectKeys + readDump)
+             uint8_t sectorsRead = 0;
+             if (!microelReadCard(sectorsRead)) {
+                 showMessage(
+                     "Microel Read",
+                     "Lettura fallita.\n"
+                     "UID non valido o\n"
+                     "tessera non Microel."
+                 );
+                 return;
+             }
+
+             String uidHex = buildUIDHex(g_dump.uid, g_dump.uidLen);
+
+             // Salva il dump su SD in /rfid/dumps/<UIDHEX>.bin
+             if (!saveDumpToSD(g_dump, uidHex)) {
+                 showMessage("Microel Read", "Lettura OK\nma salvataggio SD\nfallito!");
+                 return;
+             }
+
+             // Prepara la stringa del credito per il riepilogo
+             String creditStr = "N/D";
+             if (g_dump.blockRead[MICROEL_CREDIT_BLOCK]) {
+                 uint16_t c = microelGetCredit(g_dump);
+                 creditStr = String(c / 100) + "." + (c % 100 < 10 ? "0" : "") + String(c % 100) + " EUR";
+             }
+
+             // Mostra il riepilogo della lettura
+             showMessage(
+                 "Microel Read",
+                 "Done!\n"
+                 "UID: " +
+                     uidHex + "\n" + "Settori: " + String(sectorsRead) + "/" + String(g_dump.numSectors) +
+                     "\n" + "Credito: " + creditStr + "\n" + "Salvato:\n/rfid/dumps/" + uidHex + ".bin"
+             );
+
+             // Chiede se associare/cambiare il gestore per questa tessera
+             String gestoreAttuale = lookupGestore(uidHex);
+             String prompt =
+                 gestoreAttuale.isEmpty() ? "Associate gestore?" : "Gestore: " + gestoreAttuale + "\nChange?";
+
+             std::vector<Option> gestoreOpts = {
+                 {       "Yes",
+         [uidHex]() {
+                      auto list = loadGestori();
+                      if (list.empty()) {
+                          showMessage(
+                              "Gestori",
+                              "Nessun gestore.\n"
+                              "Aggiungine uno\n"
+                              "dal menu Gestori."
+                          );
+                          return;
+                      }
+                      std::vector<Option> gOpts;
+                      for (auto &g : list) {
+                          gOpts.push_back(
+                              {g.c_str(),
+                               [uidHex, g]() {
+                                   if (associateGestore(uidHex, g))
+                                       showMessage(
+                                           "Microel Read", "Associato:\n" + uidHex + "\nGestore: " + g
+                                       );
+                                   else showMessage("Microel Read", "Errore salvataggio.");
+                               },
+                               false}
+                          );
+                      }
+                      loopOptions(gOpts, MENU_TYPE_SUBMENU, "Select gestore");
+                  }, false},
+                 {"No", []() {}, false},
+             };
+             loopOptions(gestoreOpts, MENU_TYPE_SUBMENU, prompt.c_str());
+         },           false                },
+
+        // ── Write Microel ─────────────────────────────────────────────────────
+        // Come WriteTessera() ma chiama microelWriteCard() invece di mifareWriteDump():
+        // scrive ANCHE il blocco 0 su tag magic per clonazione completa.
+        {"Write",
+         []() {
+             // Verifica che la cartella dei dump esista
+             if (!SD.exists("/rfid/dumps")) {
+                 showMessage("Microel Write", "No /rfid/dumps\nfolder on SD.");
+                 return;
+             }
+
+             // Elenca i file .bin disponibili
+             File dir = SD.open("/rfid/dumps");
+             std::vector<Option> fileOpts;
+
+             while (true) {
+                 File entry = dir.openNextFile();
+                 if (!entry) break;
+                 String name = String(entry.name());
+                 entry.close();
+                 if (!name.endsWith(".bin")) continue; // salta file non .bin
+
+                 fileOpts.push_back(
+                     {name.c_str(),
+                      [name]() {
+                          String path = "/rfid/dumps/" + name;
+
+                          // static: evita ~5 KB di overhead sullo stack ESP32
+                          static MifareDump loadedDump;
+                          if (!loadDumpFromSD(loadedDump, path)) {
+                              showMessage("Microel Write", "Cannot load dump:\n" + path);
+                              return;
+                          }
+
+                          // Recupera UID e gestore del dump per il menu di conferma
+                          String dumpUID = buildUIDHex(loadedDump.uid, loadedDump.uidLen);
+                          String gestore = lookupGestore(dumpUID);
+                          String gStr = gestore.isEmpty() ? "N/A" : gestore;
+
+                          // Chiede conferma mostrando UID e gestore del dump selezionato
+                          std::vector<Option> confirm = {
+                              {"Yes, write",
+         []() {
+                                   // Attende il tag target senza sovrascrivere g_dump
+                                   showInfo("Microel Write", "Avvicina il tag\ntarget al lettore...");
+
+                                   uint8_t uid[7], uidLen;
+                                   if (!waitForAnyMifareTag(uid, &uidLen)) {
+                                       showMessage("Microel Write", "Nessun tag trovato.");
+                                       return;
+                                   }
+
+                                   // Avvisa se l'UID del tag fisico ≠ UID del dump
+                                   String targetUID = buildUIDHex(uid, uidLen);
+                                   String srcUID = buildUIDHex(loadedDump.uid, loadedDump.uidLen);
+                                   if (targetUID != srcUID) {
+                                       showMessage(
+                                           "Microel Write",
+                                           "UID diverso!\n"
+                                           "Dump: " +
+                                               srcUID + "\n" + "Tag:  " + targetUID +
+                                               "\n"
+                                               "Continuo..."
+                                       );
+                                   }
+
+                                   // Mostra stato di scrittura (incluso blocco 0)
+                                   showInfo(
+                                       "Microel Write",
+                                       "Scrittura...\n"
+                                       "Keep tag on reader!\n"
+                                       "(incluso blocco 0)"
+                                   );
+
+                                   // microelWriteCard = mifareWriteDump + mifareWriteBlock0
+                                   uint8_t sectorsWritten = 0;
+                                   bool block0Written = false;
+                                   if (!microelWriteCard(loadedDump, sectorsWritten, block0Written)) {
+                                       showMessage(
+                                           "Microel Write",
+                                           "Scrittura fallita!\n"
+                                           "Nessun settore scritto."
+                                       );
+                                       return;
+                                   }
+
+                                   // Informa se il blocco 0 è stato scritto (tag magic) o no (tag originale)
+                                   String b0Str = block0Written ? "SI (tag magic)" : "NO (tag originale)";
+
+                                   showMessage(
+                                       "Microel Write",
+                                       "Done!\n"
+                                       "Settori: " +
+                                           String(sectorsWritten) + "/" + String(loadedDump.numSectors) +
+                                           "\n" + "Blocco 0: " + b0Str
+                                   );
+                               }, false},
+                              {"Cancel", []() {}, false}, // annulla senza scrivere
+                          };
+
+                          // Titolo del menu di conferma mostra UID e gestore del dump
+                          loopOptions(
+                              confirm,
+                              MENU_TYPE_SUBMENU,
+                              ("Scrivi " + dumpUID + "\nGestore: " + gStr + "?").c_str()
+                          );
+                      },
+                      false}
+                 );
+             }
+             dir.close();
+
+             if (fileOpts.empty()) {
+                 showMessage("Microel Write", "No .bin files in\n/rfid/dumps/");
+                 return;
+             }
+
+             loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select dump Microel");
+         }, false      },
+    };
+
+    // Mostra il sottomenu Microel con titolo "Microel"
+    loopOptions(opts, MENU_TYPE_SUBMENU, "Microel");
 }

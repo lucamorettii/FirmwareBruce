@@ -43,6 +43,7 @@ public:
      *   - Read       → legge il dump e lo salva su SD
      *   - Write      → scrive un dump scelto dalla SD
      *   - Auto Write → scrive automaticamente il dump in base all'UID
+     *   - Microel    → menu info, read, write
      *   - Gestori    → gestisce la lista dei gestori (aggiungi/modifica/elimina)
      */
     void optionsMenu() override;
