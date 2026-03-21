@@ -269,6 +269,22 @@ String lookupGestore(const String &uidHex);
 bool mifareReadDump(uint8_t &sectorsRead);
 
 /**
+ * @brief Legge tutti i settori del tag usando le chiavi già presenti in g_dump.
+ *
+ * A differenza di mifareReadDump(), questa funzione NON carica le chiavi
+ * da /rfid/chiavi.txt. Usa direttamente g_dump.keyA e g_dump.keyB per
+ * autenticarsi su ogni settore.
+ *
+ * Usata da microelReadCard() dopo che microelInjectKeys() ha già iniettato
+ * le chiavi KDF in g_dump: in quel caso le chiavi corrette sono già in RAM
+ * e non serve cercarle sulla SD.
+ *
+ * @param sectorsRead Numero di settori letti con successo (output).
+ * @return true se almeno un settore è stato letto.
+ */
+bool mifareReadDumpWithKeys(uint8_t &sectorsRead);
+
+/**
  * @brief Scrive un dump sul tag fisico presente sul lettore.
  *
  * Autentica ogni settore con le chiavi memorizzate nel dump (Key A prima, Key B come fallback).

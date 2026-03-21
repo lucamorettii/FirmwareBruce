@@ -280,13 +280,11 @@ bool microelVerify(MifareDump &dump) {
  * il chiamante è responsabile di mostrare l'avanzamento se necessario.
  */
 bool microelReadCard(uint8_t &sectorsRead) {
-    // Attende il tag e popola g_dump.uid, g_dump.sak, ecc.
     if (!waitForMifareTag()) {
         Serial.println("[Microel] Nessun tag rilevato.");
         return false;
     }
 
-    // Verifica che l'UID sia di 4 byte (requisito Microel)
     if (g_dump.uidLen != MICROEL_UID_LENGTH) {
         Serial.printf("[Microel] UID di %d byte, attesi 4.\n", g_dump.uidLen);
         return false;
@@ -299,8 +297,9 @@ bool microelReadCard(uint8_t &sectorsRead) {
     // Inietta le chiavi KDF nei settori con chiavi di default
     microelInjectKeys(g_dump);
 
-    // Legge tutti i settori del tag usando le chiavi appena iniettate
-    bool ok = mifareReadDump(sectorsRead);
+    // USA mifareReadDumpWithKeys invece di mifareReadDump:
+    // le chiavi sono già in g_dump.keyA/keyB, non vanno caricate dalla SD
+    bool ok = mifareReadDumpWithKeys(sectorsRead);
     if (!ok) Serial.println("[Microel] Lettura fallita.");
     else Serial.printf("[Microel] Letti %d settori.\n", sectorsRead);
 
@@ -545,7 +544,7 @@ void microelInfoCard() {
         "UID: " + uidHex +
             "\n"
             "KeyA: " +
-            keyAStr +
+            keyAStr + "\nKeyB: " + keyBStr +
             "\n"
             "Lettura credito..."
     );
@@ -554,7 +553,7 @@ void microelInfoCard() {
     mifareReadDump(sectorsRead); // legge i blocchi con le chiavi KDF
 
     // Prepara la stringa del credito corrente
-    String creditStr = "N/D"; // valore di fallback se il blocco non è stato letto
+    String creditStr = "unknow"; // valore di fallback se il blocco non è stato letto
     if (g_dump.blockRead[MICROEL_CREDIT_BLOCK]) {
         uint16_t c = microelGetCredit(g_dump);
         // Formatta come "X.XX EUR" con padding dello zero per i centesimi < 10
@@ -562,7 +561,7 @@ void microelInfoCard() {
     }
 
     // Prepara la stringa del credito precedente
-    String prevStr = "N/D";
+    String prevStr = "unknow";
     if (g_dump.blockRead[MICROEL_PREV_CREDIT_BLOCK]) {
         const uint8_t *b = g_dump.data[MICROEL_PREV_CREDIT_BLOCK];
         uint16_t p = (uint16_t)(b[MICROEL_CREDIT_BYTE_LOW] | (b[MICROEL_CREDIT_BYTE_HIGH] << 8));
@@ -571,13 +570,13 @@ void microelInfoCard() {
 
     // Cerca il gestore associato all'UID in /rfid/gestori_map.txt
     String gestore = lookupGestore(uidHex);
-    if (gestore.isEmpty()) gestore = "N/A"; // nessun gestore associato
+    if (gestore.isEmpty()) gestore = "unknow"; // nessun gestore associato
 
     // Mostra tutte le informazioni in un unico pannello e attende un tasto
     showMessage(
         "Microel Info",
         "UID: " + uidHex + "\n" + "KeyA: " + keyAStr + "\n" + "KeyB: " + keyBStr + "\n" +
-            "Credito: " + creditStr + "\n" + "Prec.: " + prevStr + "\n" + "Gestore: " + gestore
+            "Credito: " + creditStr + "\n" + "Credito Precedente: " + prevStr + "\n" + "Gestore: " + gestore
     );
 }
 

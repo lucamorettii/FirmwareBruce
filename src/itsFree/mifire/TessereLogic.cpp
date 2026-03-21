@@ -742,6 +742,104 @@ bool mifareReadDump(uint8_t &sectorsRead) {
     return mifareClassicReadDump(sectorsRead);                    // Classic
 }
 
+/**
+ * @brief Legge tutti i settori del tag MIFARE Classic usando le chiavi in g_dump.
+ *
+ * Identico a mifareClassicReadDump() ma invece di chiamare loadKeysForUID()
+ * costruisce il vettore di chiavi direttamente da g_dump.keyA[] e g_dump.keyB[]
+ * dei settori già noti.
+ *
+ * Sequenza per ogni settore:
+ *  1. Se keyAFound[s] è true, tenta l'autenticazione con g_dump.keyA[s].
+ *  2. Se keyBFound[s] è true, tenta l'autenticazione con g_dump.keyB[s].
+ *  3. Se almeno una autentica, legge tutti i blocchi del settore.
+ *  4. Ripristina Key A e Key B nel trailer (l'hardware le oscura durante la lettura).
+ */
+static bool mifareClassicReadDumpWithKeys(uint8_t &sectorsRead) {
+    sectorsRead = 0;
+
+    for (uint8_t s = 0; s < g_dump.numSectors; s++) {
+        uint8_t trailer = trailerBlock(s);
+        uint8_t first = firstBlock(s);
+        uint8_t count = blocksInSector(s);
+        bool authenticated = false;
+
+        // ── Tentativo con Key A (se presente nel dump) ─────────────────────
+        if (g_dump.keyAFound[s]) {
+            if (mifareNfc.mifareclassic_AuthenticateBlock(
+                    g_dump.uid, g_dump.uidLen, trailer, 0, g_dump.keyA[s]
+                )) {
+                authenticated = true;
+            } else {
+                // Re-selezione dopo auth fallita
+                mifareNfc.inRelease(1);
+                mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
+            }
+        }
+
+        // ── Tentativo con Key B (se presente nel dump) ─────────────────────
+        if (!authenticated && g_dump.keyBFound[s]) {
+            if (mifareNfc.mifareclassic_AuthenticateBlock(
+                    g_dump.uid, g_dump.uidLen, trailer, 1, g_dump.keyB[s]
+                )) {
+                authenticated = true;
+            } else {
+                mifareNfc.inRelease(1);
+                mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
+            }
+        }
+
+        // Se nessuna delle due chiavi ha funzionato, salta il settore
+        if (!authenticated) {
+            Serial.printf("[TESSERE] Sector %u: key auth failed, skipping.\n", s);
+            continue;
+        }
+
+        // Prova comunque Key B separatamente per salvarla nel dump
+        // (anche se Key A ha già autenticato, Key B potrebbe essere diversa)
+        if (g_dump.keyAFound[s] && g_dump.keyBFound[s]) {
+            // Re-autentica con Key A per rimettere il tag in stato valido
+            mifareNfc.mifareclassic_AuthenticateBlock(g_dump.uid, g_dump.uidLen, trailer, 0, g_dump.keyA[s]);
+            // Tenta Key B per verificarla
+            mifareNfc.mifareclassic_AuthenticateBlock(g_dump.uid, g_dump.uidLen, trailer, 1, g_dump.keyB[s]);
+            // Ri-autentica con Key A per la lettura dei blocchi
+            mifareNfc.mifareclassic_AuthenticateBlock(g_dump.uid, g_dump.uidLen, trailer, 0, g_dump.keyA[s]);
+        }
+
+        // ── Lettura di tutti i blocchi del settore ─────────────────────────
+        for (uint8_t b = 0; b < count; b++) {
+            uint8_t blockNum = first + b;
+            if (mifareNfc.mifareclassic_ReadDataBlock(blockNum, g_dump.data[blockNum]))
+                g_dump.blockRead[blockNum] = true;
+            else Serial.printf("[TESSERE] Sector %u block %u read failed.\n", s, blockNum);
+        }
+
+        // ── Ripristino chiavi nel trailer ──────────────────────────────────
+        // L'hardware restituisce Key A come 00×6 durante la lettura del trailer:
+        // la sovrascriviamo con quella che sappiamo essere corretta.
+        if (g_dump.keyAFound[s]) memcpy(g_dump.data[trailer], g_dump.keyA[s], 6);
+        if (g_dump.keyBFound[s]) memcpy(g_dump.data[trailer] + 10, g_dump.keyB[s], 6);
+
+        sectorsRead++;
+    }
+    return sectorsRead > 0;
+}
+
+/**
+ * @brief Dispatcher pubblico: usa le chiavi già in g_dump invece della SD.
+ *
+ * Supporta solo MIFARE Classic: per Ultralight non serve autenticazione
+ * quindi mifareReadDump() va già bene così com'è.
+ */
+bool mifareReadDumpWithKeys(uint8_t &sectorsRead) {
+    if (g_dump.sak == 0x00) {
+        // Ultralight non usa chiavi: questa funzione non ha senso qui
+        Serial.println("[TESSERE] mifareReadDumpWithKeys: tag Ultralight, usa mifareReadDump().");
+        return false;
+    }
+    return mifareClassicReadDumpWithKeys(sectorsRead);
+}
+
 // ─── Scrittura dump ───────────────────────────────────────────────────────────
 
 /**
