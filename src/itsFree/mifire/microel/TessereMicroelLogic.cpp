@@ -548,9 +548,37 @@ void microelInfoCard() {
             "\n"
             "Lettura credito..."
     );
+    // debug
+    Serial.printf("[DEBUG] uidLen: %d\n", g_dump.uidLen);
+    Serial.printf(
+        "[DEBUG] uid: %02X%02X%02X%02X\n", g_dump.uid[0], g_dump.uid[1], g_dump.uid[2], g_dump.uid[3]
+    );
+    Serial.printf(
+        "[DEBUG] keyAFound[0]: %d  keyA: %02X%02X%02X%02X%02X%02X\n",
+        g_dump.keyAFound[0],
+        g_dump.keyA[0][0],
+        g_dump.keyA[0][1],
+        g_dump.keyA[0][2],
+        g_dump.keyA[0][3],
+        g_dump.keyA[0][4],
+        g_dump.keyA[0][5]
+    );
+    Serial.printf(
+        "[DEBUG] keyAFound[1]: %d  keyA: %02X%02X%02X%02X%02X%02X\n",
+        g_dump.keyAFound[1],
+        g_dump.keyA[1][0],
+        g_dump.keyA[1][1],
+        g_dump.keyA[1][2],
+        g_dump.keyA[1][3],
+        g_dump.keyA[1][4],
+        g_dump.keyA[1][5]
+    );
 
     uint8_t sectorsRead = 0;
-    mifareReadDump(sectorsRead); // legge i blocchi con le chiavi KDF
+    mifareReadDumpWithKeys(sectorsRead); // legge i blocchi con le chiavi KDF
+
+    Serial.printf("[DEBUG] sectorsRead: %d\n", sectorsRead);
+    Serial.printf("[DEBUG] blockRead[4]: %d\n", g_dump.blockRead[4]);
 
     // Prepara la stringa del credito corrente
     String creditStr = "unknow"; // valore di fallback se il blocco non è stato letto
@@ -654,19 +682,23 @@ uint16_t microelCreditMenu() {
     return selected;
 }
 
-bool microelGenerateKeysFromString(const String &uidHex, uint8_t keyA[MICROEL_KEY_LENGTH], uint8_t keyB[MICROEL_KEY_LENGTH]) {
+bool microelGenerateKeysFromString(
+    const String &uidHex, uint8_t keyA[MICROEL_KEY_LENGTH], uint8_t keyB[MICROEL_KEY_LENGTH]
+) {
     // Valida lunghezza: UID Microel = 4 byte = 8 caratteri hex
     if (uidHex.length() != MICROEL_UID_LENGTH * 2) {
-        Serial.printf("[Microel] UID non valido: attesi %d chars, ricevuti %d.\n",
-                      MICROEL_UID_LENGTH * 2, uidHex.length());
+        Serial.printf(
+            "[Microel] UID non valido: attesi %d chars, ricevuti %d.\n",
+            MICROEL_UID_LENGTH * 2,
+            uidHex.length()
+        );
         return false;
     }
 
     // Valida che tutti i caratteri siano esadecimali
     for (int i = 0; i < (int)uidHex.length(); i++) {
         if (!isHexadecimalDigit(uidHex[i])) {
-            Serial.printf("[Microel] Carattere non hex '%c' in posizione %d.\n",
-                          uidHex[i], i);
+            Serial.printf("[Microel] Carattere non hex '%c' in posizione %d.\n", uidHex[i], i);
             return false;
         }
     }
@@ -685,7 +717,9 @@ bool microelGenerateKeysFromString(const String &uidHex, uint8_t keyA[MICROEL_KE
     return true;
 }
 
-bool microelSaveKeysToSD(const String &uidHex, const uint8_t keyA[MICROEL_KEY_LENGTH], const uint8_t keyB[MICROEL_KEY_LENGTH]) {
+bool microelSaveKeysToSD(
+    const String &uidHex, const uint8_t keyA[MICROEL_KEY_LENGTH], const uint8_t keyB[MICROEL_KEY_LENGTH]
+) {
     if (!SD.exists("/rfid")) SD.mkdir("/rfid");
 
     // Converte keyA e keyB in stringhe hex maiuscole

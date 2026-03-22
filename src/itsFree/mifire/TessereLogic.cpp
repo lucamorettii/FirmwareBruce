@@ -592,6 +592,10 @@ bool waitForMifareTag() {
     memset(g_dump.keyAFound, 0, sizeof(g_dump.keyAFound));
     memset(g_dump.keyBFound, 0, sizeof(g_dump.keyBFound));
 
+    // Azzera anche i buffer delle chiavi
+    memset(g_dump.keyA, 0, sizeof(g_dump.keyA));
+    memset(g_dump.keyB, 0, sizeof(g_dump.keyB));
+
     Serial.printf(
         "[TESSERE] Tag found: %s UID=%s\n",
         g_dump.tagType.c_str(),
@@ -767,7 +771,7 @@ static bool mifareClassicReadDumpWithKeys(uint8_t &sectorsRead) {
         // ── Tentativo con Key A (se presente nel dump) ─────────────────────
         if (g_dump.keyAFound[s]) {
             if (mifareNfc.mifareclassic_AuthenticateBlock(
-                    g_dump.uid, g_dump.uidLen, trailer, 0, g_dump.keyA[s]
+                    g_dump.uid, g_dump.uidLen, first, 0, g_dump.keyA[s]
                 )) {
                 authenticated = true;
             } else {
@@ -780,7 +784,7 @@ static bool mifareClassicReadDumpWithKeys(uint8_t &sectorsRead) {
         // ── Tentativo con Key B (se presente nel dump) ─────────────────────
         if (!authenticated && g_dump.keyBFound[s]) {
             if (mifareNfc.mifareclassic_AuthenticateBlock(
-                    g_dump.uid, g_dump.uidLen, trailer, 1, g_dump.keyB[s]
+                    g_dump.uid, g_dump.uidLen, first, 1, g_dump.keyB[s]
                 )) {
                 authenticated = true;
             } else {
@@ -809,9 +813,14 @@ static bool mifareClassicReadDumpWithKeys(uint8_t &sectorsRead) {
         // ── Lettura di tutti i blocchi del settore ─────────────────────────
         for (uint8_t b = 0; b < count; b++) {
             uint8_t blockNum = first + b;
-            if (mifareNfc.mifareclassic_ReadDataBlock(blockNum, g_dump.data[blockNum]))
+            if (mifareNfc.mifareclassic_ReadDataBlock(blockNum, g_dump.data[blockNum])) {
                 g_dump.blockRead[blockNum] = true;
-            else Serial.printf("[TESSERE] Sector %u block %u read failed.\n", s, blockNum);
+            } else {
+                Serial.printf("[TESSERE] Sector %u block %u read failed.\n", s, blockNum);
+                mifareNfc.inRelease(1);
+                mifareNfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, g_dump.uid, &g_dump.uidLen, 1000);
+                break; // esci dal loop blocchi, passa al settore successivo
+            }
         }
 
         // ── Ripristino chiavi nel trailer ──────────────────────────────────
