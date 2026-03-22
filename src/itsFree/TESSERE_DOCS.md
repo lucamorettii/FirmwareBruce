@@ -175,6 +175,8 @@ il formato del dump, o aggiungi funzioni NFC generiche.
 | `microelWriteCard()`         | Scrive dump + blocco 0 (per tag magic)          |
 | `microelCreditMenu()`        | Menu Serial per scegliere importo ricarica      |
 | `microelRechargeTessera()`   | Flusso completo ricarica (leggi→scegli→scrivi)  |
+| `microelGenerateKeysFromString()` | Valida stringa UID hex → KDF → Key A + Key B      |
+| `microelSaveKeysToSD()`      | Salva Key A e Key B in /rfid/chiavi.txt per UID  |
 
 ---
 
@@ -493,5 +495,4 @@ Usa il parametro `block0Written` per sapere se la clonazione è stata completa.
 ```
 1. Microel (generale)
 2. Verificare la scrittura microel e classic
-3. Implementare la generazioni di chiavi tramite stringa
 ```

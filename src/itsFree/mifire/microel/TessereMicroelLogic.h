@@ -101,6 +101,33 @@ struct MicroelBlockData {
 // ─── KDF: generazione chiavi ──────────────────────────────────────────────────
 
 /**
+ * @brief Genera Key A e Key B Microel da una stringa UID esadecimale.
+ *
+ * Converte la stringa hex (es. "1E733840") in bytes, poi esegue il KDF.
+ * Valida lunghezza (8 chars) e caratteri (solo hex) prima di procedere.
+ *
+ * @param uidHex Stringa UID in formato hex maiuscolo/minuscolo (es. "1E733840").
+ * @param keyA   Buffer output Key A (6 byte).
+ * @param keyB   Buffer output Key B (6 byte).
+ * @return true se la stringa è valida e le chiavi sono state generate.
+ */
+bool microelGenerateKeysFromString(const String &uidHex, uint8_t keyA[MICROEL_KEY_LENGTH], uint8_t keyB[MICROEL_KEY_LENGTH]);
+
+/**
+ * @brief Salva Key A e Key B per un UID in /rfid/chiavi.txt.
+ *
+ * Aggiunge due righe nel formato "UID,CHIAVEHEX", compatibile con
+ * loadKeysForUID(). Non sovrascrive righe esistenti per lo stesso UID:
+ * le nuove righe vengono aggiunte in append.
+ *
+ * @param uidHex Stringa UID in formato hex maiuscolo (es. "1E733840").
+ * @param keyA   Key A da salvare (6 byte).
+ * @param keyB   Key B da salvare (6 byte).
+ * @return true se il salvataggio è riuscito.
+ */
+bool microelSaveKeysToSD(const String &uidHex, const uint8_t keyA[MICROEL_KEY_LENGTH], const uint8_t keyB[MICROEL_KEY_LENGTH]);
+
+/**
  * @brief Step 1 del KDF: calcola il valore intermedio sumHex dall'UID.
  *
  * Algoritmo:

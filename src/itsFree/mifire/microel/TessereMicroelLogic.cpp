@@ -654,6 +654,88 @@ uint16_t microelCreditMenu() {
     return selected;
 }
 
+bool microelGenerateKeysFromString(const String &uidHex, uint8_t keyA[MICROEL_KEY_LENGTH], uint8_t keyB[MICROEL_KEY_LENGTH]) {
+    // Valida lunghezza: UID Microel = 4 byte = 8 caratteri hex
+    if (uidHex.length() != MICROEL_UID_LENGTH * 2) {
+        Serial.printf("[Microel] UID non valido: attesi %d chars, ricevuti %d.\n",
+                      MICROEL_UID_LENGTH * 2, uidHex.length());
+        return false;
+    }
+
+    // Valida che tutti i caratteri siano esadecimali
+    for (int i = 0; i < (int)uidHex.length(); i++) {
+        if (!isHexadecimalDigit(uidHex[i])) {
+            Serial.printf("[Microel] Carattere non hex '%c' in posizione %d.\n",
+                          uidHex[i], i);
+            return false;
+        }
+    }
+
+    // Converte la stringa hex in array di byte
+    uint8_t uid[MICROEL_UID_LENGTH];
+    for (int i = 0; i < MICROEL_UID_LENGTH; i++) {
+        String byteStr = uidHex.substring(i * 2, i * 2 + 2);
+        uid[i] = (uint8_t)strtol(byteStr.c_str(), nullptr, 16);
+    }
+
+    // Esegue il KDF standard Microel
+    microelGenerateKeys(uid, MICROEL_UID_LENGTH, keyA, keyB);
+
+    Serial.printf("[Microel] Chiavi generate per UID %s\n", uidHex.c_str());
+    return true;
+}
+
+bool microelSaveKeysToSD(const String &uidHex, const uint8_t keyA[MICROEL_KEY_LENGTH], const uint8_t keyB[MICROEL_KEY_LENGTH]) {
+    if (!SD.exists("/rfid")) SD.mkdir("/rfid");
+
+    // Converte keyA e keyB in stringhe hex maiuscole
+    String keyAStr, keyBStr;
+    for (int i = 0; i < MICROEL_KEY_LENGTH; i++) {
+        if (keyA[i] < 0x10) keyAStr += '0';
+        keyAStr += String(keyA[i], HEX);
+        if (keyB[i] < 0x10) keyBStr += '0';
+        keyBStr += String(keyB[i], HEX);
+    }
+    keyAStr.toUpperCase();
+    keyBStr.toUpperCase();
+
+    String lineA = uidHex + "," + keyAStr;
+    String lineB = uidHex + "," + keyBStr;
+    bool foundA = false, foundB = false;
+
+    // Scorre il file cercando le righe già presenti
+    if (SD.exists("/rfid/chiavi.txt")) {
+        File f = SD.open("/rfid/chiavi.txt", FILE_READ);
+        if (f) {
+            while (f.available()) {
+                String line = f.readStringUntil('\n');
+                line.trim();
+                if (line == lineA) foundA = true;
+                if (line == lineB) foundB = true;
+                if (foundA && foundB) break; // trovate entrambe: inutile continuare
+            }
+            f.close();
+        }
+    }
+
+    // Scrive solo le righe mancanti
+    if (!foundA || !foundB) {
+        File f = SD.open("/rfid/chiavi.txt", FILE_APPEND);
+        if (!f) {
+            Serial.println("[Microel] Impossibile aprire chiavi.txt in scrittura.");
+            return false;
+        }
+        if (!foundA) f.println(lineA);
+        if (!foundB) f.println(lineB);
+        f.close();
+        Serial.printf("[Microel] Chiavi salvate in chiavi.txt per UID %s\n", uidHex.c_str());
+    } else {
+        Serial.printf("[Microel] Chiavi per UID %s già presenti, skip.\n", uidHex.c_str());
+    }
+
+    return true;
+}
+
 /**
  * @brief Flusso completo di ricarica: leggi → scegli importo → conferma → scrivi.
  *

@@ -515,7 +515,7 @@ void MicroelTessera() {
         {"Info",
          []() {
              microelInfoCard(); // mostra UID, Key A/B, credito, gestore su display
-         }, false},
+         },        false                  },
 
         // ── Read Microel ───────────────────────────────────────────────────────
         // Come ReadTessera() ma usa le chiavi KDF invece di /rfid/chiavi.txt.
@@ -602,7 +602,7 @@ void MicroelTessera() {
                  {"No", []() {}, false},
              };
              loopOptions(gestoreOpts, MENU_TYPE_SUBMENU, prompt.c_str());
-         },           false                },
+         },                  false                                         },
 
         // ── Write Microel ─────────────────────────────────────────────────────
         // Come WriteTessera() ma chiama microelWriteCard() invece di mifareWriteDump():
@@ -722,7 +722,57 @@ void MicroelTessera() {
              }
 
              loopOptions(fileOpts, MENU_TYPE_SUBMENU, "Select dump Microel");
-         }, false      },
+         },        false                               },
+         
+        // ── Genera Chiavi da UID ──────────────────────────────────────────────────
+        // Nessun tag fisico richiesto: calcola Key A e Key B da UID inserito
+        // manualmente, mostra il risultato e salva in /rfid/chiavi.txt.
+        {"Genera Chiavi",
+         []() {
+             // Apre la tastiera Bruce per l'inserimento dell'UID
+             String uidInput = keyboard("", 8, "UID (8 char hex):");
+
+             if (uidInput.isEmpty()) {
+                 showMessage("Microel", "Operazione annullata.");
+                 return;
+             }
+
+             uidInput.toUpperCase(); // normalizza per display e salvataggio
+
+             // Genera le chiavi: valida internamente lunghezza e caratteri hex
+             uint8_t keyA[MICROEL_KEY_LENGTH], keyB[MICROEL_KEY_LENGTH];
+             if (!microelGenerateKeysFromString(uidInput, keyA, keyB)) {
+                 showMessage(
+                     "Genera Chiavi",
+                     "UID non valido.\n"
+                     "Inserisci esattamente\n"
+                     "8 caratteri hex.\n"
+                     "Es: 1E733840"
+                 );
+                 return;
+             }
+
+             // Converte le chiavi in stringhe hex per il display
+             String keyAStr, keyBStr;
+             for (int i = 0; i < MICROEL_KEY_LENGTH; i++) {
+                 if (keyA[i] < 0x10) keyAStr += '0';
+                 keyAStr += String(keyA[i], HEX);
+                 if (keyB[i] < 0x10) keyBStr += '0';
+                 keyBStr += String(keyB[i], HEX);
+             }
+             keyAStr.toUpperCase();
+             keyBStr.toUpperCase();
+
+             // Salva in chiavi.txt
+             bool saved = microelSaveKeysToSD(uidInput, keyA, keyB);
+             String savedStr = saved ? "Salvate in chiavi.txt" : "Errore salvataggio SD";
+
+             // Mostra risultato e attende tasto
+             showMessage(
+                 "Genera Chiavi",
+                 "UID:  " + uidInput + "\n" + "KeyA: " + keyAStr + "\n" + "KeyB: " + keyBStr + "\n" + savedStr
+             );
+         },false},
     };
 
     // Mostra il sottomenu Microel con titolo "Microel"
