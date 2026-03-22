@@ -12,7 +12,7 @@
 #ifndef __MIKAI_H__
 #define __MIKAI_H__
 
-#include "itsFree/mikai/MikaiLogic.h"
+#include "itsFree/mikai/MikaiLogica.h"
 #include "pn532_srix.h"
 #include <MenuItemInterface.h>
 #include <vector>
@@ -22,7 +22,7 @@
  *
  * Eredita da MenuItemInterface e sovrascrive i tre metodi richiesti da Bruce:
  *   - drawIcon()    → disegna l'icona nel launcher.
- *   - optionsMenu() → inizializza l'NFC e mostra il menu delle operazioni.
+ *   - optionsMenu() → inizializza il driver NFC (una sola volta) e mostra il menu.
  *   - hasTheme() / themePath() → integrazione con il sistema di theming.
  */
 class Mikai : public MenuItemInterface {
@@ -32,16 +32,21 @@ public:
 
     /**
      * @brief Disegna l'icona del lettore NFC nel launcher di Bruce.
-     * @param scale Fattore di scala fornito da Bruce in base alla dimensione dello schermo.
+     *
+     * Rappresenta stilisticamente un terminale NFC: corpo esterno, zona di
+     * lettura, pannello pulsanti, pulsante centrale e slot carta.
+     * Tutte le dimensioni sono proporzionali al parametro @p scale.
+     *
+     * @param scale Fattore di scala fornito da Bruce in base alla risoluzione dello schermo.
      */
     void drawIcon(float scale) override;
 
     /**
      * @brief Inizializza il driver PN532 (una sola volta) e mostra il menu principale.
      *
-     * Se il PN532 non risponde all'inizializzazione, mostra un errore e ritorna.
-     * Altrimenti presenta il sottomenu con Info, Add credit, Set credit, Reset,
-     * Export/Import vendor.
+     * L'inizializzazione I²C avviene su SDA/SCL letti da bruceConfigPins,
+     * a 100 kHz. Se il PN532 non risponde, mostra un errore e ritorna.
+     * Altrimenti presenta il sottomenu con tutte le operazioni disponibili.
      */
     void optionsMenu() override;
 
