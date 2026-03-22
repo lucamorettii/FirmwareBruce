@@ -108,8 +108,10 @@ bool salvaChiaviSD(const String &uidHex, const uint8_t chiaveA[LUNGHEZZA_CHIAVE]
     if (!trovataA || !trovataB) {
         File f = SD.open(PERCORSO_CHIAVI, FILE_APPEND);
         if (!f) return false;
+        f.println();
         if (!trovataA) f.println(rigaA);
         if (!trovataB) f.println(rigaB);
+        f.println();
         f.close();
     }
     return true;
