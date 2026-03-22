@@ -1,13 +1,21 @@
+#pragma once
+
 /**
  * @file Tessere.h
  * @brief Dichiarazione della classe Tessere, voce di menu Bruce per tag MIFARE.
  *
- * Tessere implementa l'interfaccia MenuItemInterface di Bruce, aggiungendo
- * al firmware la gestione dei tag NFC MIFARE (Classic 1K/4K/Mini, Ultralight).
- * Espone:
- *   - Un'icona vettoriale scalabile che rappresenta una carta con chip EMV.
- *   - Il menu principale con Info, Read, Write, Auto Write e Gestori.
- *   - Il supporto al sistema di theming di Bruce.
+ * Tessere implementa MenuItemInterface di Bruce aggiungendo al firmware
+ * la gestione dei tag NFC MIFARE (Classic 1K/4K/Mini, Ultralight).
+ *
+ * Il PN532 viene inizializzato una sola volta all'ingresso del menu
+ * (in optionsMenu()), non ad ogni singola operazione.
+ *
+ * Struttura del menu:
+ *   - Info           → UID, SAK, ATQA, tipo, gestore, dump SD
+ *   - Read           → legge dump e salva su SD
+ *   - Write          → sottomenu: Scrivi / Scrivi Auto
+ *   - Microel        → sottomenu: Info, Leggi, Imposta Credito, Genera Chiavi
+ *   - Config         → sottomenu: Gestori (Visualizza/Aggiungi/Modifica/Elimina)
  */
 
 #ifndef __TESSERE_H__
@@ -19,9 +27,9 @@
 /**
  * @brief Voce di menu Bruce per la gestione dei tag NFC MIFARE.
  *
- * Eredita da MenuItemInterface e sovrascrive i tre metodi richiesti:
- *   - drawIcon()    → disegna l'icona nel launcher.
- *   - optionsMenu() → mostra il menu delle operazioni disponibili.
+ * Eredita da MenuItemInterface e sovrascrive i metodi richiesti:
+ *   - drawIcon()    → icona carta con chip EMV nel launcher.
+ *   - optionsMenu() → menu principale con inizializzazione PN532.
  *   - hasTheme() / themePath() → integrazione con il sistema di theming.
  */
 class Tessere : public MenuItemInterface {
@@ -31,20 +39,15 @@ public:
 
     /**
      * @brief Disegna l'icona della carta con chip EMV nel launcher di Bruce.
-     * @param scale Fattore di scala fornito da Bruce in base alla risoluzione.
+     * @param scala Fattore di scala fornito da Bruce in base alla risoluzione.
      */
-    void drawIcon(float scale) override;
+    void drawIcon(float scala) override;
 
     /**
-     * @brief Mostra il menu principale con le operazioni disponibili sul tag.
+     * @brief Inizializza il PN532 e mostra il menu principale delle operazioni.
      *
-     * Voci del menu:
-     *   - Info       → identifica il tag (UID, SAK, ATQA, tipo, gestore)
-     *   - Read       → legge il dump e lo salva su SD
-     *   - Write      → scrive un dump scelto dalla SD
-     *   - Auto Write → scrive automaticamente il dump in base all'UID
-     *   - Microel    → menu info, read, write
-     *   - Gestori    → gestisce la lista dei gestori (aggiungi/modifica/elimina)
+     * Se il PN532 non risponde, mostra un errore e ritorna senza aprire il menu.
+     * Il PN532 non viene reinizializzato nelle chiamate successive (lazy init).
      */
     void optionsMenu() override;
 
