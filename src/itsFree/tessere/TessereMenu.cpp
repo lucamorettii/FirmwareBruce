@@ -315,62 +315,52 @@ void menuMicroel() {
 
              uint8_t settoriLetti = 0;
              if (!leggiTesseraMicroel(settoriLetti)) {
-                 mostraMessaggio(
-                     "Microel - Credito",
-                     "Lettura fallita.\n"
-                     "Tessera non Microel."
-                 );
+                 mostraMessaggio("Microel - Credito", "Lettura fallita.\nTessera non Microel.");
                  return;
              }
 
              uint16_t creditoAttuale = leggiCredito(dump_globale);
              String strAttuale = String(creditoAttuale / 100) + "." + (creditoAttuale % 100 < 10 ? "0" : "") + String(creditoAttuale % 100) + " EUR";
 
-             // Importi disponibili in centesimi e relative etichette
-             const uint16_t importi[] = {500, 1000, 1500, 2000, 2500};
-             const char *etichette[] = {" 5.00 EUR", "10.00 EUR", "15.00 EUR", "20.00 EUR", "25.00 EUR"};
-
-             std::vector<Option> sceltaImporto;
-             for (int i = 0; i < 5; i++) {
-                 uint16_t imp = importi[i];
-                 sceltaImporto.push_back(
-                     {etichette[i],
-                      [imp]() {
-                          // Aggiorna il credito in RAM
-                          impostaCredito(dump_globale, imp);
-
-                          mostraInfo(
-                              "Microel - Credito",
-                              "Scrittura in corso...\n"
-                              "Non rimuovere la tessera!"
-                          );
-
-                          uint8_t settoriScritti = 0;
-                          bool blocco0Scritto = false;
-                          if (!scriviTesseraMicroel(dump_globale, settoriScritti, blocco0Scritto)) {
-                              mostraMessaggio(
-                                  "Microel - Credito",
-                                  "Scrittura fallita!\n"
-                                  "Nessun settore scritto."
-                              );
-                              return;
-                          }
-
-                          String nuovoStr = String(imp / 100) + "." + (imp % 100 < 10 ? "0" : "") + String(imp % 100) + " EUR";
-                          mostraMessaggio(
-                              "Microel - Credito",
-                              "Fatto!\n"
-                              "Nuovo credito: " +
-                                  nuovoStr +
-                                  "\n"
-                                  "Settori: " +
-                                  String(settoriScritti)
-                          );
-                      },
-                      false}
-                 );
+             // Input libero: l'utente digita il credito in euro (es. "15" o "15.50")
+             String input = keyboard("", 6, ("Credito (" + strAttuale + "):").c_str());
+             if (input.isEmpty()) {
+                 mostraMessaggio("Microel - Credito", "Annullato.");
+                 return;
              }
-             loopOptions(sceltaImporto, MENU_TYPE_SUBMENU, ("Credito: " + strAttuale).c_str());
+
+             // Converte in centesimi (supporta "15" e "15.50")
+             uint16_t nuovoCentesimi = 0;
+             int dot = input.indexOf('.');
+             if (dot < 0) {
+                 nuovoCentesimi = input.toInt() * 100;
+             } else {
+                 uint16_t euro = input.substring(0, dot).toInt();
+                 String decPart = input.substring(dot + 1);
+                 if (decPart.length() == 1) decPart += "0";
+                 uint16_t cent = decPart.substring(0, 2).toInt();
+                 nuovoCentesimi = euro * 100 + cent;
+             }
+
+             if (nuovoCentesimi == 0) {
+                 mostraMessaggio("Microel - Credito", "Importo non valido.");
+                 return;
+             }
+
+             // Applica con la logica completa verificata
+             impostaCreditoCompleto(dump_globale, nuovoCentesimi);
+
+             mostraInfo("Microel - Credito", "Scrittura in corso...\nNon rimuovere la tessera!");
+
+             uint8_t settoriScritti = 0;
+             bool blocco0Scritto = false;
+             if (!scriviTesseraMicroel(dump_globale, settoriScritti, blocco0Scritto)) {
+                 mostraMessaggio("Microel - Credito", "Scrittura fallita!\nNessun settore scritto.");
+                 return;
+             }
+
+             String nuovoStr = String(nuovoCentesimi / 100) + "." + (nuovoCentesimi % 100 < 10 ? "0" : "") + String(nuovoCentesimi % 100) + " EUR";
+             mostraMessaggio("Microel - Credito", "Fatto!\nNuovo credito: " + nuovoStr + "\nSettori: " + String(settoriScritti));
          },                                                 false},
 
         // Genera Chiavi: calcola Key A e Key B da UID inserito manualmente
