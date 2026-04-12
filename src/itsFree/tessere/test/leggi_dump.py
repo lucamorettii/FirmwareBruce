@@ -360,7 +360,7 @@ def mostra_microel(h, blocchi, letti):
     if letti[4]:
         d4      = blocchi[4]
         credito = d4[5] | (d4[6] << 8)
-        cs_calc = sum(d4[:15]) % 256
+        cs_calc = (0x21 + sum(d4[:15])) % 256
         cs_file = d4[15]
         cs_ok   = cs_calc == cs_file
         riga_campo("Credito corrente", fmt_eur(credito), C.B_GIALLO + C.BOLD)
