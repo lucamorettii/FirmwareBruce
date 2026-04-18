@@ -329,26 +329,21 @@ void menuMicroel() {
                  return;
              }
 
-             // Converte in centesimi (supporta "15" e "15.50")
-             uint16_t nuovoCentesimi = 0;
+             // Converte in centesimi
+             uint16_t creditoCentesimi = 0;
              int dot = input.indexOf('.');
              if (dot < 0) {
-                 nuovoCentesimi = input.toInt() * 100;
+                 creditoCentesimi = input.toInt() * 100;
              } else {
                  uint16_t euro = input.substring(0, dot).toInt();
                  String decPart = input.substring(dot + 1);
                  if (decPart.length() == 1) decPart += "0";
                  uint16_t cent = decPart.substring(0, 2).toInt();
-                 nuovoCentesimi = euro * 100 + cent;
-             }
-
-             if (nuovoCentesimi == 0) {
-                 mostraMessaggio("Microel - Credito", "Importo non valido.");
-                 return;
+                 creditoCentesimi = euro * 100 + cent;
              }
 
              // Applica con la logica completa verificata
-             impostaCreditoCompleto(dump_globale, nuovoCentesimi);
+             impostaCredito(dump_globale, creditoCentesimi);
 
              mostraInfo("Microel - Credito", "Scrittura in corso...\nNon rimuovere la tessera!");
 
@@ -359,7 +354,8 @@ void menuMicroel() {
                  return;
              }
 
-             String nuovoStr = String(nuovoCentesimi / 100) + "." + (nuovoCentesimi % 100 < 10 ? "0" : "") + String(nuovoCentesimi % 100) + " EUR";
+             String nuovoStr =
+                 String(creditoCentesimi / 100) + "." + (creditoCentesimi % 100 < 10 ? "0" : "") + String(creditoCentesimi % 100) + " EUR";
              mostraMessaggio("Microel - Credito", "Fatto!\nNuovo credito: " + nuovoStr + "\nSettori: " + String(settoriScritti));
          },                                                 false},
 

@@ -198,39 +198,35 @@ uint16_t leggiCredito(const DumpMifare &dump) {
     return (uint16_t)(b[BYTE_CREDITO_BASSO] | (b[BYTE_CREDITO_ALTO] << 8));
 }
 
-void impostaCreditoCompleto(DumpMifare &dump, uint16_t nuovoCredito) {
+void impostaCredito(DumpMifare &dump, uint16_t nuovoCredito) {
     if (!dump.bloccLetto[BLOCCO_CREDITO]) return;
 
-    // Data fissa verificata su dump reali funzionanti (13€, 30€)
     const uint32_t DATA_TX = 0xD25E501A;
 
     // Decodifica blocco 4 attuale
     DatiBloccoMicroel attuale;
     decodificaBlocco(dump.dati[BLOCCO_CREDITO], attuale);
 
-    // ── Blocco 5: copia dello stato attuale (diventa il "precedente") ──
-    // La data di B5 rimane quella già presente in B4 (la transazione precedente)
+    // ── Blocco 5: copia dello stato attuale (diventa il "precedente")
+    // La data rimane quella già presente in B4
     DatiBloccoMicroel prec = attuale;
     costruisciBlocco(prec, dump.dati[BLOCCO_CREDITO_PREC]);
     dump.bloccLetto[BLOCCO_CREDITO_PREC] = true;
 
-    // ── Blocco 4: nuovo stato ─────────────────────────────────────────
+    // ── Blocco 4:
     DatiBloccoMicroel nuovo;
-    nuovo.numeroOperazione   = attuale.numeroOperazione + 1;
-    // importoTx = differenza se si sta aumentando, altrimenti il nuovo valore
-    uint16_t importoTx = (nuovoCredito > attuale.credito)
-                         ? (nuovoCredito - attuale.credito)
-                         : nuovoCredito;
-    nuovo.totaleCarichiInput  = attuale.totaleCarichiInput + importoTx;
-    nuovo.deposito            = attuale.deposito; // invariato
-    nuovo.credito             = nuovoCredito;
-    nuovo.dataTransazione     = DATA_TX;
-    nuovo.punti               = attuale.punti;
+    nuovo.numeroOperazione = attuale.numeroOperazione + 1;
+    uint16_t importoTx = (nuovoCredito > attuale.credito) ? (nuovoCredito - attuale.credito) : nuovoCredito;
+    nuovo.totaleCarichiInput = attuale.totaleCarichiInput + importoTx;
+    nuovo.deposito = attuale.deposito;
+    nuovo.credito = nuovoCredito;
+    nuovo.dataTransazione = DATA_TX;
+    nuovo.punti = attuale.punti;
     nuovo.importoUltimaOperaz = importoTx;
     costruisciBlocco(nuovo, dump.dati[BLOCCO_CREDITO]);
     dump.bloccLetto[BLOCCO_CREDITO] = true;
 
-    // ── Blocco 6: copia esatta di blocco 4 ───────────────────────────
+    // ── Blocco 6: copia esatta di blocco 4
     memcpy(dump.dati[BLOCCO_CREDITO + 2], dump.dati[BLOCCO_CREDITO], 16);
     dump.bloccLetto[BLOCCO_CREDITO + 2] = true;
 }

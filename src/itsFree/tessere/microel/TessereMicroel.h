@@ -174,17 +174,17 @@ uint8_t calcolaChecksum(const uint8_t dati[16]);
 // ─── Lettura / modifica credito ───────────────────────────────────────────────
 
 /**
- * @brief Aggiorna credito con storico completo coerente (logica Microel verificata).
+ * @brief Aggiorna il credito nel dump in RAM senza scrivere sul tag.
  *
- * B5 ← stato attuale di B4 (diventa il "precedente")
- * B4 ← nuovo stato con credito sostituito, op++, totale aggiornato
- * B6 ← copia esatta di B4
- * Data fissa al valore del protocollo Microel verificato su dump reali.
+ * Copia il credito corrente nel blocco 5 (precedente), poi imposta il nuovo
+ * valore nel blocco 4. Ricalcolando il checksum.
+ * La scrittura fisica avviene solo con scriviTesseraMicroel() o scriviDump().
+ * Data fissa per la transazione.
  *
- * @param dump         Dump da modificare in RAM.
- * @param nuovoCredito Nuovo credito in centesimi (sostituzione, non aggiunta).
+ * @param dump      Dump da modificare (tipicamente dump_globale).
+ * @param nuovoCredito Nuovo valore in centesimi (es. 1500 = 15.00 €).
  */
-void impostaCreditoCompleto(DumpMifare &dump, uint16_t nuovoCredito);
+void impostaCredito(DumpMifare &dump, uint16_t nuovoCredito);
 
 /**
  * @brief Legge il credito corrente dal blocco 4 del dump in centesimi.
